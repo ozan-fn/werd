@@ -7,11 +7,11 @@ type Procs = { apache: Proc[]; mariadb: Proc[] };
 
 type LogEntry = { service: 'apache' | 'mariadb' | 'system'; line: string };
 
-const tabs = ['Services', 'Databases', 'Config', 'About'] as const;
+const tabs = ['Services', 'Projects', 'Databases', 'Config', 'About'] as const;
 type Tab = (typeof tabs)[number];
 
 const dbs = ['app_werd', 'blog'];
-const ports = ['8080 (httpd)', '3306 (mysql)'];
+const ports = ['80 (httpd)', '3306 (mysql)'];
 
 const wsUrl = (() => {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -19,7 +19,11 @@ const wsUrl = (() => {
 })();
 
 export const App = () => {
-  const [tab, setTab] = useState<Tab>('Services');
+  const [tab, setTab] = useState<Tab>(() => (localStorage.getItem('werd-tab') as Tab) || 'Services');
+  const changeTab = (t: Tab) => {
+    setTab(t);
+    localStorage.setItem('werd-tab', t);
+  };
   const [status, setStatus] = useState<Status>({ apache: false, mariadb: false });
   const [procs, setProcs] = useState<Procs>({ apache: [], mariadb: [] });
   const [loading, setLoading] = useState<{ apache: boolean; mariadb: boolean }>({
@@ -28,6 +32,7 @@ export const App = () => {
   });
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [connected, setConnected] = useState(false);
+  const [projects, setProjects] = useState<any[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
@@ -61,7 +66,13 @@ export const App = () => {
           setLogs((l) => [...l.slice(-199), { service: msg.service, line: msg.line }]);
         } else if (msg.type === 'error') {
           setLogs((l) => [...l.slice(-199), { service: 'system', line: `[error] ${msg.message}` }]);
+        } else if (msg.type === 'projects') {
+          setProjects(msg.projects || []);
         }
+      };
+      ws.onopen = () => {
+        if (closed) return;
+        ws.send(JSON.stringify({ action: 'listProjects' }));
       };
     };
     connect();
@@ -71,7 +82,7 @@ export const App = () => {
     };
   }, []);
 
-  const control = (service: 'apache' | 'mariadb', action: 'start' | 'stop') => {
+  const control = (service: 'apache' | 'mariadb', action: 'start' | 'stop' | 'restart') => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     setLoading((l) => ({ ...l, [service]: true }));
@@ -82,7 +93,7 @@ export const App = () => {
     <div className="min-h-screen bg-zinc-950 text-zinc-100 antialiased">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 py-8">
         <Header running={connected && status.apache && status.mariadb} connected={connected} />
-        <Tabs current={tab} onSelect={setTab} />
+        <Tabs current={tab} onSelect={changeTab} />
         {tab === 'Services' && (
           <Services
             status={status}
@@ -97,6 +108,7 @@ export const App = () => {
             }}
           />
         )}
+        {tab === 'Projects' && <Projects projects={projects} ws={wsRef} />}
         {tab === 'Databases' && <Databases />}
         {tab === 'Config' && <Config />}
         {tab === 'About' && <About />}
@@ -166,7 +178,7 @@ const ServiceCard = ({
   running: boolean;
   procs: Proc[];
   loading: boolean;
-  onControl: (a: 'start' | 'stop') => void;
+  onControl: (a: 'start' | 'stop' | 'restart') => void;
 }) => (
   <div className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900 p-4">
     <div className="flex items-center gap-3">
@@ -197,6 +209,14 @@ const ServiceCard = ({
       </button>
       <button
         disabled={loading || !running}
+        onClick={() => onControl('restart')}
+        title={!running ? 'Not running' : loading ? 'Busy' : undefined}
+        className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {loading ? <Spinner /> : 'Restart'}
+      </button>
+      <button
+        disabled={loading || !running}
         onClick={() => onControl('stop')}
         title={!running ? 'Not running' : loading ? 'Busy' : undefined}
         className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
@@ -217,7 +237,7 @@ const Services = ({
   status: Status;
   procs: Procs;
   loading: { apache: boolean; mariadb: boolean };
-  onControl: (s: 'apache' | 'mariadb', a: 'start' | 'stop') => void;
+  onControl: (s: 'apache' | 'mariadb', a: 'start' | 'stop' | 'restart') => void;
   onAll: (a: 'startAll' | 'stopAll') => void;
 }) => (
   <div className="grid gap-4">
@@ -254,7 +274,7 @@ const Services = ({
     <ServiceCard
       name="Apache"
       version="2.4.66"
-      port="8080"
+      port="80"
       dir="bin/httpd-2.4.66"
       running={status.apache}
       procs={procs.apache}
@@ -286,11 +306,11 @@ const Services = ({
         <span className="size-2.5 rounded-full bg-emerald-500" />
         <div>
           <div className="text-sm font-medium text-zinc-100">phpMyAdmin</div>
-          <div className="text-xs text-zinc-400">5.2.3 · :8080</div>
+          <div className="text-xs text-zinc-400">5.2.3 · :80</div>
         </div>
       </div>
       <a
-        href="http://127.0.0.1:8080"
+        href="http://localhost/phpmyadmin"
         target="_blank"
         rel="noreferrer"
         className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-800"
@@ -300,6 +320,153 @@ const Services = ({
     </div>
   </div>
 );
+
+const Projects = ({ projects, ws }: { projects: any[]; ws: any }) => {
+  const [picking, setPicking] = useState(false);
+  const [pending, setPending] = useState<{ path: string; url: string } | null>(null);
+
+  const send = (obj: any) => {
+    const w = ws.current;
+    if (w && w.readyState === WebSocket.OPEN) w.send(JSON.stringify(obj));
+  };
+
+  const openExplorer = () => {
+    setPicking(true);
+    send({ action: 'pickFolder' });
+  };
+
+  useEffect(() => {
+    if (!picking) return;
+    const onMsg = (ev: any) => {
+      let msg: any;
+      try {
+        msg = JSON.parse(ev.data);
+      } catch {
+        return;
+      }
+      if (msg.type === 'folderPicked') {
+        setPicking(false);
+        const p = msg.path || '';
+        if (!p) return;
+        const parts = p.replace(/\\/g, '/').split('/').filter(Boolean);
+        const folder = parts[parts.length - 1] || '';
+        const host = folder.toLowerCase().replace(/[^a-z0-9.-]+/g, '-');
+        setPending({ path: p, url: `http://${host || 'project'}.localhost` });
+      }
+    };
+    const w = ws.current;
+    if (w) w.addEventListener('message', onMsg);
+    return () => {
+      if (w) w.removeEventListener('message', onMsg);
+    };
+  }, [picking, ws]);
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-medium text-zinc-300">Projects</h2>
+        <button
+          onClick={openExplorer}
+          disabled={picking}
+          className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-emerald-950 hover:bg-emerald-500 disabled:opacity-50"
+        >
+          {picking ? '...' : '+ Add Project'}
+        </button>
+      </div>
+      <div className="overflow-hidden rounded-lg border border-zinc-800">
+        <table className="w-full text-left text-sm">
+          <thead className="border-b border-zinc-800 bg-zinc-900 text-xs text-zinc-500">
+            <tr>
+              <th className="px-4 py-2 font-medium">Path</th>
+              <th className="px-4 py-2 font-medium">URL</th>
+              <th className="px-4 py-2 font-medium text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-zinc-800 bg-zinc-950">
+            {projects.length === 0 && (
+              <tr>
+                <td className="px-4 py-4 text-xs text-zinc-500" colSpan={3}>
+                  Belum ada project. Klik + Add Project.
+                </td>
+              </tr>
+            )}
+            {projects.map((p) => (
+              <tr key={p.id}>
+                <td className="px-4 py-2 text-xs text-zinc-300">{p.path}</td>
+                <td className="px-4 py-2">
+                  <input
+                    value={p.url}
+                    onChange={(e: any) => send({ action: 'updateUrl', id: p.id, url: e.target.value })}
+                    placeholder="http://project.localhost"
+                    className="w-full rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs text-zinc-300 outline-none focus:border-emerald-600"
+                  />
+                </td>
+                <td className="px-4 py-2 text-right">
+                  <div className="flex justify-end gap-2">
+                    <a
+                      href={p.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded-lg border border-zinc-700 px-3 py-1 text-xs font-medium text-zinc-300 hover:bg-zinc-800"
+                    >
+                      Open
+                    </a>
+                    <button
+                      onClick={() => send({ action: 'removeProject', id: p.id })}
+                      className="rounded-lg border border-red-800 px-3 py-1 text-xs font-medium text-red-400 hover:bg-red-950"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {pending && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-md rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+            <h3 className="mb-4 text-sm font-medium text-zinc-200">Add Project</h3>
+            <div className="mb-3">
+              <label className="mb-1 block text-xs text-zinc-500">Path</label>
+              <input
+                value={pending.path}
+                readOnly
+                className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-300 outline-none"
+              />
+            </div>
+            <div className="mb-4">
+              <label className="mb-1 block text-xs text-zinc-500">URL</label>
+              <input
+                value={pending.url}
+                onChange={(e: any) => setPending({ ...pending, url: e.target.value })}
+                className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-300 outline-none focus:border-emerald-600"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setPending(null)}
+                className="rounded-md px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  send({ action: 'addProject', path: pending.path, url: pending.url });
+                  setPending(null);
+                }}
+                className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-emerald-950 hover:bg-emerald-500"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 const Spinner = () => (
   <span className="inline-block size-3 animate-spin rounded-full border-2 border-current border-t-transparent align-[-1px]" />

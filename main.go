@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,6 +22,7 @@ import (
 
 	"github.com/gogpu/systray"
 	"github.com/gorilla/websocket"
+	"github.com/sqweek/dialog"
 )
 
 //go:embed all:web/dist
@@ -104,6 +106,52 @@ func (c *client) writePump() {
 	}
 }
 
+func (c *client) sendTo(v any) {
+	b, _ := json.Marshal(v)
+	select {
+	case c.send <- b:
+	default:
+	}
+}
+
+// ---- projects ----
+
+type Project struct {
+	ID   string `json:"id"`
+	Path string `json:"path"`
+	URL  string `json:"url"`
+}
+
+func projectsFile() string {
+	os.MkdirAll(filepath.Join(root, "var"), 0755)
+	return filepath.Join(root, "var", "projects.json")
+}
+
+func loadProjects() []Project {
+	data, err := os.ReadFile(projectsFile())
+	if err != nil {
+		return nil
+	}
+	var ps []Project
+	if json.Unmarshal(data, &ps) != nil {
+		return nil
+	}
+	return ps
+}
+
+func saveProjects(ps []Project) {
+	b, _ := json.MarshalIndent(ps, "", "  ")
+	os.WriteFile(projectsFile(), b, 0644)
+}
+
+func pickFolder() string {
+	dir, err := dialog.Directory().Title("Pilih folder project").Browse()
+	if err != nil {
+		return ""
+	}
+	return dir
+}
+
 func (c *client) readPump() {
 	defer func() { c.h.del(c); c.ws.Close() }()
 	for {
@@ -112,8 +160,11 @@ func (c *client) readPump() {
 			return
 		}
 		var m struct {
-			Action  string `json:"action"`
-			Service string `json:"service"`
+			Action  string  `json:"action"`
+			Service string  `json:"service"`
+			ID      string  `json:"id"`
+			Path    string  `json:"path"`
+			URL     string  `json:"url"`
 		}
 		if json.Unmarshal(raw, &m) != nil {
 			continue
@@ -123,10 +174,49 @@ func (c *client) readPump() {
 			c.sm.start(m.Service)
 		case "stop":
 			c.sm.stop(m.Service)
+		case "restart":
+			c.sm.stop(m.Service)
+			c.sm.start(m.Service)
 		case "startAll":
 			c.sm.startAll()
 		case "stopAll":
 			c.sm.stopAll()
+		case "listProjects":
+			c.sendTo(map[string]any{"type": "projects", "projects": loadProjects()})
+		case "addProject":
+			if m.Path == "" {
+				break
+			}
+			ps := loadProjects()
+			id := strconv.FormatInt(time.Now().UnixNano(), 10)
+			ps = append(ps, Project{ID: id, Path: m.Path, URL: m.URL})
+			saveProjects(ps)
+			writeVhosts()
+			c.sm.restartApache()
+			c.sendTo(map[string]any{"type": "projects", "projects": loadProjects()})
+		case "updateUrl":
+			ps := loadProjects()
+			for i := range ps {
+				if ps[i].ID == m.ID {
+					ps[i].URL = m.URL
+				}
+			}
+			saveProjects(ps)
+			c.sendTo(map[string]any{"type": "projects", "projects": loadProjects()})
+		case "removeProject":
+			ps := loadProjects()
+			out := ps[:0]
+			for _, p := range ps {
+				if p.ID != m.ID {
+					out = append(out, p)
+				}
+			}
+			saveProjects(out)
+			writeVhosts()
+			c.sm.restartApache()
+			c.sendTo(map[string]any{"type": "projects", "projects": loadProjects()})
+		case "pickFolder":
+			c.sendTo(map[string]any{"type": "folderPicked", "path": pickFolder()})
 		}
 	}
 }
@@ -362,6 +452,11 @@ func (m *svcMgr) startAll() {
 	m.start("apache")
 }
 
+func (m *svcMgr) restartApache() {
+	m.stop("apache")
+	m.start("apache")
+}
+
 func (m *svcMgr) stopAll() {
 	m.stop("apache")
 	m.stop("mariadb")
@@ -447,12 +542,45 @@ func copyConfig(src, dst string) {
 	}
 }
 
+func projectHost(path string) string {
+	base := filepath.Base(filepath.Clean(path))
+	re := regexp.MustCompile(`[^a-zA-Z0-9.-]+`)
+	return strings.ToLower(re.ReplaceAllString(base, "-")) + ".localhost"
+}
+
+func writeVhosts() {
+	os.MkdirAll(filepath.Join(root, "var"), 0755)
+	var b strings.Builder
+	for _, p := range loadProjects() {
+		host := projectHost(p.Path)
+		dir := p.Path
+		if s, err := os.Stat(filepath.Join(dir, "public")); err == nil && s.IsDir() {
+			dir = filepath.Join(dir, "public")
+		}
+		dirSlashed := filepath.ToSlash(dir)
+		b.WriteString("\n<VirtualHost *:80>\n")
+		b.WriteString("    ServerName " + host + "\n")
+		b.WriteString("    ServerAlias www." + host + "\n")
+		b.WriteString("    DocumentRoot \"" + dirSlashed + "\"\n")
+		b.WriteString("    <Directory \"" + dirSlashed + "\">\n")
+		b.WriteString("        Options Indexes FollowSymLinks\n")
+		b.WriteString("        AllowOverride All\n")
+		b.WriteString("        Require all granted\n")
+		b.WriteString("    </Directory>\n")
+		b.WriteString("</VirtualHost>\n")
+	}
+	if err := os.WriteFile(filepath.Join(root, "var", "vhosts.conf"), []byte(b.String()), 0644); err != nil {
+		log.Printf("[vhosts] write: %v", err)
+	}
+}
+
 func copyConfigs() {
 	os.MkdirAll(logDir, 0755)
 	copyConfig(filepath.Join(root, "config", "httpd.conf"), filepath.Join(httpdRoot, "conf", "httpd.conf"))
 	copyConfig(filepath.Join(root, "config", "php.ini"), filepath.Join(root, "bin", "php-8.4.23-Win32-vs17-x64", "php.ini"))
 	copyConfig(filepath.Join(root, "config", "my.ini"), filepath.Join(root, "bin", "mysql-8.4.11-winx64", "my.ini"))
 	copyConfig(filepath.Join(root, "config", "config.inc.php"), filepath.Join(root, "bin", "phpMyAdmin-5.2.3-english", "config.inc.php"))
+	writeVhosts()
 }
 
 
