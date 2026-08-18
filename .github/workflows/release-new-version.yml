@@ -1,0 +1,130 @@
+name: Release (new version)
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump (from latest release tag)
+        required: true
+        default: patch
+        type: choice
+        options:
+          - major
+          - minor
+          - patch
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Enable corepack (pnpm)
+        run: corepack enable
+
+      - name: Build web (dist + brotli)
+        working-directory: web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+
+      - name: Install UPX
+        run: sudo apt-get update && sudo apt-get install -y upx-ucl
+
+      - name: Build werd.exe
+        run: go build -ldflags "-s -w" -o werd.exe .
+
+      - name: Compress werd.exe
+        run: upx --best --lzma werd.exe
+
+      - name: Cache downloaded packages
+        id: cache-pkg
+        uses: actions/cache@v4
+        with:
+          path: download
+          key: werd-packages-v1
+
+      - name: Download packages
+        if: steps.cache-pkg.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p download
+          curl -fLo download/httpd.zip "https://www.apachelounge.com/download/VS17/binaries/httpd-2.4.66-251206-Win64-VS17.zip"
+          curl -fLo download/php.zip "https://downloads.php.net/~windows/releases/php-8.4.24-Win32-vs17-x64.zip"
+          curl -fLo download/pma.zip "https://files.phpmyadmin.net/phpMyAdmin/5.2.3/phpMyAdmin-5.2.3-english.zip"
+
+      - name: Compute next version
+        id: ver
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PREV=$(gh release list --limit 1 --json tagName -q '.[0].tagName' 2>/dev/null || echo "v0.0.0")
+          PREV=${PREV:-v0.0.0}
+          V=${PREV#v}
+          IFS=. read -r MA MI PA <<< "$V"
+          MA=${MA:-0}; MI=${MI:-0}; PA=${PA:-0}
+          case "${{ github.event.inputs.bump }}" in
+            major) MA=$((MA+1)); MI=0; PA=0 ;;
+            minor) MI=$((MI+1)); PA=0 ;;
+            patch) PA=$((PA+1)) ;;
+          esac
+          echo "tag=v${MA}.${MI}.${PA}" >> "$GITHUB_OUTPUT"
+          echo "prev=${PREV}" >> "$GITHUB_OUTPUT"
+
+      - name: Assemble staging
+        shell: bash
+        run: |
+          set -eux
+          STAGE="$GITHUB_WORKSPACE/stage"
+          W="$STAGE/werd-${{ steps.ver.outputs.tag }}"
+          mkdir -p "$W/bin" "$W/var/logs"
+
+          unzip -q download/httpd.zip -d "$W/bin"
+          unzip -q download/php.zip   -d "$W/bin"
+          unzip -q download/pma.zip   -d "$W/bin"
+
+          if [ -d "$W/bin/Apache24" ]; then
+            mkdir -p "$W/bin/httpd-2.4.66-251206-Win64-VS17"
+            mv "$W/bin/Apache24" "$W/bin/httpd-2.4.66-251206-Win64-VS17/Apache24"
+          fi
+
+          if [ -d "$W/bin/php-8.4.24-Win32-vs17-x64" ]; then
+            mv "$W/bin/php-8.4.24-Win32-vs17-x64" "$W/bin/php-8.4.23-Win32-vs17-x64"
+          fi
+
+          cp -r config "$W/config"
+          cp werd.exe README.md "$W/"
+          touch "$W/var/logs/.gitkeep"
+
+      - name: Zip release
+        shell: bash
+        run: |
+          cd stage
+          zip -qr "$GITHUB_WORKSPACE/werd-windows-x64.zip" "werd-${{ steps.ver.outputs.tag }}"
+
+      - name: Create release + upload
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: ${{ steps.ver.outputs.tag }}
+          body: |
+            Built from previous release `${{ steps.ver.outputs.prev }}`.
+
+            > Extract so that `bin` lands at `E:\werd\bin`.
+          files: werd-windows-x64.zip
+          generate_release_notes: true

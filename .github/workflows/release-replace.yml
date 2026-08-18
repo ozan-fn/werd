@@ -1,0 +1,115 @@
+name: Release (replace existing)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Enable corepack (pnpm)
+        run: corepack enable
+
+      - name: Build web (dist + brotli)
+        working-directory: web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+
+      - name: Install UPX
+        run: sudo apt-get update && sudo apt-get install -y upx-ucl
+
+      - name: Build werd.exe
+        run: go build -ldflags "-s -w" -o werd.exe .
+
+      - name: Compress werd.exe
+        run: upx --best --lzma werd.exe
+
+      - name: Cache downloaded packages
+        id: cache-pkg
+        uses: actions/cache@v4
+        with:
+          path: download
+          key: werd-packages-v1
+
+      - name: Download packages
+        if: steps.cache-pkg.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p download
+          curl -fLo download/httpd.zip "https://www.apachelounge.com/download/VS17/binaries/httpd-2.4.66-251206-Win64-VS17.zip"
+          curl -fLo download/php.zip "https://downloads.php.net/~windows/releases/php-8.4.24-Win32-vs17-x64.zip"
+          curl -fLo download/pma.zip "https://files.phpmyadmin.net/phpMyAdmin/5.2.3/phpMyAdmin-5.2.3-english.zip"
+
+      - name: Resolve latest tag
+        id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=$(gh release list --limit 1 --json tagName -q '.[0].tagName')
+          if [ -z "$TAG" ]; then
+            echo "::error::No existing release found to replace."
+            exit 1
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Assemble staging
+        shell: bash
+        run: |
+          set -eux
+          STAGE="$GITHUB_WORKSPACE/stage"
+          W="$STAGE/werd-${{ steps.tag.outputs.tag }}"
+          mkdir -p "$W/bin" "$W/var/logs"
+
+          unzip -q download/httpd.zip -d "$W/bin"
+          unzip -q download/php.zip   -d "$W/bin"
+          unzip -q download/pma.zip   -d "$W/bin"
+
+          if [ -d "$W/bin/Apache24" ]; then
+            mkdir -p "$W/bin/httpd-2.4.66-251206-Win64-VS17"
+            mv "$W/bin/Apache24" "$W/bin/httpd-2.4.66-251206-Win64-VS17/Apache24"
+          fi
+
+          if [ -d "$W/bin/php-8.4.24-Win32-vs17-x64" ]; then
+            mv "$W/bin/php-8.4.24-Win32-vs17-x64" "$W/bin/php-8.4.23-Win32-vs17-x64"
+          fi
+
+          cp -r config "$W/config"
+          cp werd.exe README.md "$W/"
+          touch "$W/var/logs/.gitkeep"
+
+      - name: Zip release
+        shell: bash
+        run: |
+          cd stage
+          zip -qr "$GITHUB_WORKSPACE/werd-windows-x64.zip" "werd-${{ steps.tag.outputs.tag }}"
+
+      - name: Replace asset on latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=$(gh release list --limit 1 --json tagName -q '.[0].tagName')
+          if [ -z "$TAG" ]; then
+            echo "::error::No existing release found to replace."
+            exit 1
+          fi
+          echo "Replacing asset on release: $TAG"
+          gh release delete-asset "$TAG" werd-windows-x64.zip --yes || echo "no prior asset"
+          gh release upload "$TAG" werd-windows-x64.zip --clobber

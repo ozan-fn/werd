@@ -1,0 +1,26 @@
+# Binary / build artifacts
+werd.exe
+*.exe
+*.zip
+
+# Runtime data
+var/
+var/logs/*
+!var/logs/.gitkeep
+
+# Vendor binaries (downloaded, not committed)
+bin/
+
+# Go
+*.test
+*.out
+
+# Node / web
+node_modules/
+web/node_modules/
+web/dist/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
