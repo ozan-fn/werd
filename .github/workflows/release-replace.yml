@@ -64,7 +64,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: download
-          key: werd-packages-v2
+          key: werd-packages-v3
 
       - name: Download packages
         if: steps.cache-pkg.outputs.cache-hit != 'true'
