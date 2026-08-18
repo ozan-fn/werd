@@ -47,7 +47,8 @@ jobs:
         if: steps.cache-upx.outputs.cache-hit != 'true'
         run: |
           mkdir -p ~/.local/bin
-          curl -fL "https://github.com/upx/upx/releases/download/v4.2.4/upx-5.2.0-amd64_linux.tar.xz" | tar -xJ --strip-components=1 -C ~/.local/bin upx-5.2.0-amd64_linux/upx
+          curl -fLo /tmp/upx.tar.xz "https://github.com/upx/upx/releases/download/v5.2.0/upx-5.2.0-amd64_linux.tar.xz"
+          tar -xJf /tmp/upx.tar.xz --strip-components=1 -C ~/.local/bin upx-5.2.0-amd64_linux/upx
 
       - name: Add UPX to PATH
         run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
