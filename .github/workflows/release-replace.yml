@@ -40,7 +40,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y upx-ucl
 
       - name: Build werd.exe
-        run: GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "-s -w" -o werd.exe .
+        run: GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "-s -w -H=windowsgui" -o werd.exe .
 
       - name: Compress werd.exe
         run: upx --best --lzma werd.exe
@@ -59,6 +59,7 @@ jobs:
           curl -fLo download/httpd.zip "https://www.apachelounge.com/download/VS17/binaries/httpd-2.4.66-251206-Win64-VS17.zip"
           curl -fLo download/php.zip "https://downloads.php.net/~windows/releases/php-8.4.24-Win32-vs17-x64.zip"
           curl -fLo download/pma.zip "https://files.phpmyadmin.net/phpMyAdmin/5.2.3/phpMyAdmin-5.2.3-english.zip"
+          curl -fLo download/mariadb.zip "https://linux.domainesia.com/mariadb///mariadb-12.3.2/winx64-packages/mariadb-12.3.2-winx64.zip"
 
       - name: Resolve latest tag
         id: tag
@@ -83,6 +84,7 @@ jobs:
           unzip -q download/httpd.zip -d "$W/bin"
           unzip -q download/php.zip   -d "$W/bin/php-extract"
           unzip -q download/pma.zip   -d "$W/bin"
+          unzip -q download/mariadb.zip -d "$W/bin"
 
           if [ -d "$W/bin/Apache24" ]; then
             mkdir -p "$W/bin/httpd-2.4.66-251206-Win64-VS17"
@@ -99,7 +101,7 @@ jobs:
         shell: bash
         run: |
           cd stage
-          zip -qr "$GITHUB_WORKSPACE/werd-windows-x64.zip" "werd-${{ steps.tag.outputs.tag }}"
+          zip -q -1 "$GITHUB_WORKSPACE/werd-windows-x64.zip" "werd-${{ steps.tag.outputs.tag }}"
 
       - name: Replace asset on latest release
         env:
@@ -110,6 +112,8 @@ jobs:
             echo "::error::No existing release found to replace."
             exit 1
           fi
-          echo "Replacing asset on release: $TAG"
-          gh release delete-asset "$TAG" werd-windows-x64.zip --yes || echo "no prior asset"
+          echo "Replacing assets on release: $TAG"
+          gh release delete-asset "$TAG" werd-windows-x64.zip --yes || echo "no prior zip"
+          gh release delete-asset "$TAG" werd.exe --yes || echo "no prior exe"
           gh release upload "$TAG" werd-windows-x64.zip --clobber
+          gh release upload "$TAG" werd.exe --clobber

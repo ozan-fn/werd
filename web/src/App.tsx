@@ -176,13 +176,11 @@ const ServiceCard = ({
         <div className="text-xs text-zinc-400">
           {version} · port {port}
         </div>
-        {running && (
-          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-zinc-500">
-            {procs.map((p) => (
-              <span key={p.pid}>
-                pid {p.pid} · cpu {p.cpu}% · ram {p.ram} MB
-              </span>
-            ))}
+        {running && procs.length > 0 && (
+          <div className="mt-1 text-[11px] text-zinc-500">
+            {procs.length > 1 ? `${procs.length} processes` : `pid ${procs[0].pid}`}
+            {' · '}cpu {Math.round(procs.reduce((s, p) => s + p.cpu, 0) * 10) / 10}%
+            {' · '}ram {Math.round(procs.reduce((s, p) => s + p.ram, 0) * 10) / 10} MB
           </div>
         )}
       </div>

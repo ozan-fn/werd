@@ -19,22 +19,43 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gogpu/systray"
 	"github.com/gorilla/websocket"
 )
 
 //go:embed all:web/dist
 var distFS embed.FS
 
-const (
-	root      = "E:/werd"
-	logDir    = root + "/var/logs"
-	httpdRoot = root + "/bin/httpd-2.4.66-251206-Win64-VS17/Apache24"
-	httpdBin  = httpdRoot + "/bin/httpd.exe"
-	mdbBinDir = root + "/bin/mariadb-12.3.2-winx64/bin"
-	mariadbd  = mdbBinDir + "/mariadbd.exe"
-	mdbAdmin  = mdbBinDir + "/mariadb-admin.exe"
-	mdbIni    = root + "/bin/mariadb-12.3.2-winx64/my.ini"
+var (
+	root      string
+	logDir    string
+	httpdRoot string
+	httpdBin  string
+	mdbBinDir string
+	mariadbd  string
+	mdbAdmin  string
+	mdbIni    string
 )
+
+func init() {
+	exe, err := os.Executable()
+	if err != nil {
+		exe = "."
+	}
+	root = filepath.Dir(exe)
+	logDir    = filepath.Join(root, "var", "logs")
+	httpdRoot = filepath.Join(root, "bin", "httpd-2.4.66-251206-Win64-VS17", "Apache24")
+	httpdBin  = filepath.Join(httpdRoot, "bin", "httpd.exe")
+	mdbBinDir = filepath.Join(root, "bin", "mariadb-12.3.2-winx64", "bin")
+	mariadbd  = filepath.Join(mdbBinDir, "mariadbd.exe")
+	mdbAdmin  = filepath.Join(mdbBinDir, "mariadb-admin.exe")
+	mdbIni    = filepath.Join(root, "bin", "mariadb-12.3.2-winx64", "my.ini")
+}
+
+func noWindow(cmd *exec.Cmd) *exec.Cmd {
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	return cmd
+}
 
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
@@ -136,18 +157,18 @@ func newSvcMgr(h *hub) *svcMgr {
 
 func imageFor(service string) string {
 	if service == "mariadb" {
-		return "mariadbd.exe"
+		return "mariadbd"
 	}
-	return "httpd.exe"
+	return "httpd"
 }
 
 func procRunning(image string) bool {
-	procs, _ := procPIDs(image)
+	procs, _ := procPIDs(image + ".exe")
 	return len(procs) > 0
 }
 
 func procPIDs(image string) ([]int, error) {
-	out, err := exec.Command("tasklist", "/FI", "IMAGENAME eq "+image, "/FO", "CSV", "/NH").Output()
+	out, err := noWindow(exec.Command("tasklist", "/FI", "IMAGENAME eq "+image, "/FO", "CSV", "/NH")).Output()
 	if err != nil {
 		return nil, err
 	}
@@ -195,7 +216,7 @@ func procStats(image string) []procInfo {
 func sampleProc(image string) map[int]procSample {
 	script := "$p=Get-Process -Name '" + image + "' -ErrorAction SilentlyContinue;" +
 		"if($p){$p|Select-Object Id,CPU,WorkingSet64|ConvertTo-Json -Compress}else{'[]'}"
-	out, err := exec.Command("powershell", "-NoProfile", "-Command", script).Output()
+	out, err := noWindow(exec.Command("powershell", "-NoProfile", "-Command", script)).Output()
 	if err != nil {
 		return nil
 	}
@@ -268,10 +289,10 @@ func (m *svcMgr) start(service string) {
 	var cmd *exec.Cmd
 	switch service {
 	case "apache":
-		cmd = exec.Command(httpdBin, "-d", httpdRoot)
+		cmd = noWindow(exec.Command(httpdBin, "-d", httpdRoot))
 		cmd.Dir = httpdRoot
 	case "mariadb":
-		cmd = exec.Command(mariadbd, "--defaults-file="+mdbIni)
+		cmd = noWindow(exec.Command(mariadbd, "--defaults-file="+mdbIni))
 		cmd.Dir = mdbBinDir
 	}
 	logFile := logDir + "/" + service + ".log"
@@ -307,14 +328,14 @@ func (m *svcMgr) stop(service string) {
 	}
 	switch service {
 	case "apache":
-		if err := exec.Command("taskkill", "/F", "/IM", "httpd.exe").Run(); err != nil {
+		if err := noWindow(exec.Command("taskkill", "/F", "/IM", "httpd.exe")).Run(); err != nil {
 			log.Printf("[apache] stop: %v", err)
 		}
 	case "mariadb":
-		if err := exec.Command(mdbAdmin, "-u", "root", "shutdown").Run(); err != nil {
+		if err := noWindow(exec.Command(mdbAdmin, "-u", "root", "shutdown")).Run(); err != nil {
 			log.Printf("[mariadb] admin shutdown: %v", err)
 		}
-		if err := exec.Command("taskkill", "/F", "/IM", "mariadbd.exe").Run(); err != nil {
+		if err := noWindow(exec.Command("taskkill", "/F", "/IM", "mariadbd.exe")).Run(); err != nil {
 			log.Printf("[mariadb] stop: %v", err)
 		}
 	}
@@ -408,43 +429,28 @@ func staticHandler() http.Handler {
 }
 
 func copyConfig(src, dst string) {
-	in, err := os.Open(src)
+	data, err := os.ReadFile(src)
 	if err != nil {
-		log.Printf("[config] open %s: %v", src, err)
+		log.Printf("[config] read %s: %v", src, err)
 		return
 	}
-	defer in.Close()
-	out, err := os.Create(dst)
-	if err != nil {
-		log.Printf("[config] create %s: %v", dst, err)
-		return
-	}
-	defer out.Close()
-	if _, err := io.Copy(out, in); err != nil {
-		log.Printf("[config] copy %s -> %s: %v", src, dst, err)
+	data = bytes.ReplaceAll(data, []byte("{{ROOT}}"), []byte(filepath.ToSlash(root)))
+	if err := os.WriteFile(dst, data, 0644); err != nil {
+		log.Printf("[config] write %s: %v", dst, err)
 	}
 }
 
 func copyConfigs() {
 	os.MkdirAll(logDir, 0755)
-	copyConfig(root+"/config/httpd.conf", httpdRoot+"/conf/httpd.conf")
-	copyConfig(root+"/config/php.ini", root+"/bin/php-8.4.23-Win32-vs17-x64/php.ini")
-	copyConfig(root+"/config/my.ini", root+"/bin/mariadb-12.3.2-winx64/my.ini")
+	copyConfig(filepath.Join(root, "config", "httpd.conf"), filepath.Join(httpdRoot, "conf", "httpd.conf"))
+	copyConfig(filepath.Join(root, "config", "php.ini"), filepath.Join(root, "bin", "php-8.4.23-Win32-vs17-x64", "php.ini"))
+	copyConfig(filepath.Join(root, "config", "my.ini"), filepath.Join(root, "bin", "mariadb-12.3.2-winx64", "my.ini"))
 }
 
 func main() {
 	copyConfigs()
 	h := newHub()
 	sm := newSvcMgr(h)
-
-	go func() {
-		ch := make(chan os.Signal, 1)
-		signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
-		<-ch
-		log.Println("shutting down: stopping services...")
-		sm.stopAll()
-		os.Exit(0)
-	}()
 
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
@@ -465,10 +471,74 @@ func main() {
 		port = "8090"
 	}
 	addr := "127.0.0.1:" + port
-	log.Printf("WERD Panel: http://%s", addr)
-	if err := http.ListenAndServe(addr, nil); err != nil {
-		log.Printf("server error: %v (is %s in use? set WERD_PORT)", err, addr)
+	url := "http://" + addr
+	log.Printf("WERD Panel: %s", url)
+
+	srv := &http.Server{Addr: addr, Handler: nil}
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("server error: %v (is %s in use? set WERD_PORT)", err, addr)
+			sm.stopAll()
+			os.Exit(1)
+		}
+	}()
+
+	go func() {
+		for range time.Tick(3 * time.Second) {
+			sm.pushStatus()
+		}
+	}()
+
+	go func() {
+		ch := make(chan os.Signal, 1)
+		signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+		<-ch
 		sm.stopAll()
-		os.Exit(1)
+		srv.Close()
+		os.Exit(0)
+	}()
+
+	runTray(sm, url)
+}
+
+// ---- tray + console ----
+
+func openBrowser(url string) {
+	noWindow(exec.Command("cmd", "/c", "start", url)).Start()
+}
+
+func trayIcon() []byte {
+	if b, err := distFS.ReadFile("web/dist/favicon.png"); err == nil {
+		return b
 	}
+	return nil
+}
+
+func runTray(sm *svcMgr, url string) {
+	quit := make(chan struct{})
+	tray := systray.New()
+
+	menu := systray.NewMenu()
+	menu.Add("Open Panel", func() { openBrowser(url) })
+	menu.AddSeparator()
+	menu.Add("Stop All Services", func() { sm.stopAll() })
+	menu.AddSeparator()
+	menu.Add("Quit", func() {
+		tray.Remove()
+		close(quit)
+		go sm.stopAll()
+	})
+
+	tray.SetTooltip("WERD Panel")
+	tray.SetIcon(trayIcon())
+	tray.SetMenu(menu)
+	tray.OnClick(func() { openBrowser(url) })
+	tray.OnDoubleClick(func() { openBrowser(url) })
+	tray.Show()
+
+	tray.ShowNotification("WERD Panel", "Running in tray — " + url)
+	tray.Run()
+
+	<-quit
+	os.Exit(0)
 }
