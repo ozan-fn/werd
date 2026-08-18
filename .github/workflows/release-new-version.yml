@@ -50,12 +50,17 @@ jobs:
         id: cache-upx
         uses: actions/cache@v4
         with:
-          path: /usr/bin/upx
-          key: upx-ucl
+          path: ~/.local/bin/upx
+          key: upx-5.2.0
 
       - name: Install UPX
         if: steps.cache-upx.outputs.cache-hit != 'true'
-        run: sudo apt-get update && sudo apt-get install -y upx-ucl
+        run: |
+          mkdir -p ~/.local/bin
+          curl -fL "https://github.com/upx/upx/releases/download/v4.2.4/upx-5.2.0-amd64_linux.tar.xz" | tar -xJ --strip-components=1 -C ~/.local/bin upx-5.2.0-amd64_linux/upx
+
+      - name: Add UPX to PATH
+        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Build werd.exe
         run: GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "-s -w -H=windowsgui" -o werd.exe .
