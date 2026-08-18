@@ -83,7 +83,7 @@ jobs:
           curl -fLo download/httpd.zip "https://www.apachelounge.com/download/VS17/binaries/httpd-2.4.66-251206-Win64-VS17.zip"
           curl -fLo download/php.zip "https://downloads.php.net/~windows/releases/php-8.4.24-Win32-vs17-x64.zip"
           curl -fLo download/pma.zip "https://files.phpmyadmin.net/phpMyAdmin/5.2.3/phpMyAdmin-5.2.3-english.zip"
-          curl -fLo download/mariadb.zip "https://mirror.djvg.sg/mariadb///mariadb-12.3.2/winx64-packages/mariadb-12.3.2-winx64.zip"
+          curl -fLo download/mysql.zip "https://cdn.mysql.com//Downloads/MySQL-8.4/mysql-8.4.11-winx64.zip"
 
       - name: Compute next version
         id: ver
@@ -114,7 +114,7 @@ jobs:
           unzip -q download/httpd.zip -d "$W/bin"
           unzip -q download/php.zip   -d "$W/bin/php-extract"
           unzip -q download/pma.zip   -d "$W/bin"
-          unzip -q download/mariadb.zip -d "$W/bin"
+          unzip -q download/mysql.zip -d "$W/bin"
 
           if [ -d "$W/bin/Apache24" ]; then
             mkdir -p "$W/bin/httpd-2.4.66-251206-Win64-VS17"

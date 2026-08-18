@@ -11,7 +11,7 @@ const tabs = ['Services', 'Databases', 'Config', 'About'] as const;
 type Tab = (typeof tabs)[number];
 
 const dbs = ['app_werd', 'blog'];
-const ports = ['8080 (httpd)', '3306 (mariadb)'];
+const ports = ['8080 (httpd)', '3306 (mysql)'];
 
 const wsUrl = (() => {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -262,10 +262,10 @@ const Services = ({
       onControl={(a) => onControl('apache', a)}
     />
     <ServiceCard
-      name="MariaDB"
-      version="12.3.2"
+      name="MySQL"
+      version="8.4.11"
       port="3306"
-      dir="bin/mariadb-12.3.2"
+      dir="bin/mysql-8.4.11"
       running={status.mariadb}
       procs={procs.mariadb}
       loading={loading.mariadb}
@@ -377,7 +377,7 @@ const About = () => (
   <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
     <h2 className="mb-1 text-sm font-semibold text-zinc-100">WERD Panel</h2>
     <p className="text-sm text-zinc-400">Control panel — alternative to XAMPP / Laragon.</p>
-    <p className="mt-2 text-xs text-zinc-500">Apache · MariaDB · PHP · phpMyAdmin</p>
+    <p className="mt-2 text-xs text-zinc-500">Apache · MySQL · PHP · phpMyAdmin</p>
   </div>
 );
 

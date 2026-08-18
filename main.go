@@ -32,7 +32,7 @@ var (
 	httpdRoot string
 	httpdBin  string
 	mdbBinDir string
-	mariadbd  string
+	mysqld    string
 	mdbAdmin  string
 	mdbIni    string
 )
@@ -46,10 +46,10 @@ func init() {
 	logDir    = filepath.Join(root, "var", "logs")
 	httpdRoot = filepath.Join(root, "bin", "httpd-2.4.66-251206-Win64-VS17", "Apache24")
 	httpdBin  = filepath.Join(httpdRoot, "bin", "httpd.exe")
-	mdbBinDir = filepath.Join(root, "bin", "mariadb-12.3.2-winx64", "bin")
-	mariadbd  = filepath.Join(mdbBinDir, "mariadbd.exe")
-	mdbAdmin  = filepath.Join(mdbBinDir, "mariadb-admin.exe")
-	mdbIni    = filepath.Join(root, "bin", "mariadb-12.3.2-winx64", "my.ini")
+	mdbBinDir = filepath.Join(root, "bin", "mysql-8.4.11-winx64", "bin")
+	mysqld  = filepath.Join(mdbBinDir, "mysqld.exe")
+	mdbAdmin  = filepath.Join(mdbBinDir, "mysqladmin.exe")
+	mdbIni    = filepath.Join(root, "bin", "mysql-8.4.11-winx64", "my.ini")
 }
 
 func noWindow(cmd *exec.Cmd) *exec.Cmd {
@@ -149,15 +149,15 @@ func newSvcMgr(h *hub) *svcMgr {
 	return &svcMgr{
 		h: h,
 		sv: map[string]*svc{
-			"apache":  {name: "apache", running: procRunning("httpd.exe")},
-			"mariadb": {name: "mariadb", running: procRunning("mariadbd.exe")},
+		"apache":  {name: "apache", running: procRunning("httpd.exe")},
+		"mariadb": {name: "mariadb", running: procRunning("mysqld.exe")},
 		},
 	}
 }
 
 func imageFor(service string) string {
 	if service == "mariadb" {
-		return "mariadbd"
+		return "mysqld"
 	}
 	return "httpd"
 }
@@ -292,15 +292,14 @@ func (m *svcMgr) start(service string) {
 		cmd = noWindow(exec.Command(httpdBin, "-d", httpdRoot))
 		cmd.Dir = httpdRoot
 	case "mariadb":
-		dataDir := filepath.Join(root, "var", "mariadb")
+		dataDir := filepath.Join(root, "var", "mysql")
 		if _, err := os.Stat(filepath.Join(dataDir, "mysql")); os.IsNotExist(err) {
 			os.MkdirAll(dataDir, 0755)
-			installDB := filepath.Join(mdbBinDir, "mysql_install_db.exe")
-			if out, err := noWindow(exec.Command(installDB, "--datadir="+dataDir, "--default-user")).CombinedOutput(); err != nil {
-				m.h.broadcast(map[string]any{"type": "log", "service": "mariadb", "line": "install_db: " + string(out)})
+			if out, err := noWindow(exec.Command(mysqld, "--initialize-insecure", "--datadir="+dataDir)).CombinedOutput(); err != nil {
+				m.h.broadcast(map[string]any{"type": "log", "service": "mariadb", "line": "initialize: " + string(out)})
 			}
 		}
-		cmd = noWindow(exec.Command(mariadbd, "--defaults-file="+mdbIni))
+		cmd = noWindow(exec.Command(mysqld, "--defaults-file="+mdbIni))
 		cmd.Dir = mdbBinDir
 	}
 	logFile := logDir + "/" + service + ".log"
@@ -343,7 +342,7 @@ func (m *svcMgr) stop(service string) {
 		if err := noWindow(exec.Command(mdbAdmin, "-u", "root", "shutdown")).Run(); err != nil {
 			log.Printf("[mariadb] admin shutdown: %v", err)
 		}
-		if err := noWindow(exec.Command("taskkill", "/F", "/IM", "mariadbd.exe")).Run(); err != nil {
+		if err := noWindow(exec.Command("taskkill", "/F", "/IM", "mysqld.exe")).Run(); err != nil {
 			log.Printf("[mariadb] stop: %v", err)
 		}
 	}
@@ -452,9 +451,10 @@ func copyConfigs() {
 	os.MkdirAll(logDir, 0755)
 	copyConfig(filepath.Join(root, "config", "httpd.conf"), filepath.Join(httpdRoot, "conf", "httpd.conf"))
 	copyConfig(filepath.Join(root, "config", "php.ini"), filepath.Join(root, "bin", "php-8.4.23-Win32-vs17-x64", "php.ini"))
-	copyConfig(filepath.Join(root, "config", "my.ini"), filepath.Join(root, "bin", "mariadb-12.3.2-winx64", "my.ini"))
+	copyConfig(filepath.Join(root, "config", "my.ini"), filepath.Join(root, "bin", "mysql-8.4.11-winx64", "my.ini"))
 	copyConfig(filepath.Join(root, "config", "config.inc.php"), filepath.Join(root, "bin", "phpMyAdmin-5.2.3-english", "config.inc.php"))
 }
+
 
 func main() {
 	copyConfigs()
@@ -533,9 +533,9 @@ func runTray(sm *svcMgr, url string) {
 	menu.Add("Stop All Services", func() { sm.stopAll() })
 	menu.AddSeparator()
 	menu.Add("Quit", func() {
+		sm.stopAll()
 		tray.Remove()
 		close(quit)
-		go sm.stopAll()
 	})
 
 	tray.SetTooltip("WERD Panel")
