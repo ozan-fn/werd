@@ -36,7 +36,15 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm run build
 
+      - name: Cache UPX
+        id: cache-upx
+        uses: actions/cache@v4
+        with:
+          path: /usr/bin/upx
+          key: upx-ucl
+
       - name: Install UPX
+        if: steps.cache-upx.outputs.cache-hit != 'true'
         run: sudo apt-get update && sudo apt-get install -y upx-ucl
 
       - name: Build werd.exe
