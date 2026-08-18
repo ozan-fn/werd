@@ -292,6 +292,14 @@ func (m *svcMgr) start(service string) {
 		cmd = noWindow(exec.Command(httpdBin, "-d", httpdRoot))
 		cmd.Dir = httpdRoot
 	case "mariadb":
+		dataDir := filepath.Join(root, "var", "mariadb")
+		if _, err := os.Stat(filepath.Join(dataDir, "mysql")); os.IsNotExist(err) {
+			os.MkdirAll(dataDir, 0755)
+			installDB := filepath.Join(mdbBinDir, "mysql_install_db.exe")
+			if out, err := noWindow(exec.Command(installDB, "--datadir="+dataDir, "--default-user")).CombinedOutput(); err != nil {
+				m.h.broadcast(map[string]any{"type": "log", "service": "mariadb", "line": "install_db: " + string(out)})
+			}
+		}
 		cmd = noWindow(exec.Command(mariadbd, "--defaults-file="+mdbIni))
 		cmd.Dir = mdbBinDir
 	}
