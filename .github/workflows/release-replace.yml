@@ -73,7 +73,7 @@ jobs:
           curl -fLo download/httpd.zip "https://www.apachelounge.com/download/VS17/binaries/httpd-2.4.66-251206-Win64-VS17.zip"
           curl -fLo download/php.zip "https://downloads.php.net/~windows/releases/php-8.4.24-Win32-vs17-x64.zip"
           curl -fLo download/pma.zip "https://files.phpmyadmin.net/phpMyAdmin/5.2.3/phpMyAdmin-5.2.3-english.zip"
-          curl -fLo download/mariadb.zip "https://linux.domainesia.com/mariadb///mariadb-12.3.2/winx64-packages/mariadb-12.3.2-winx64.zip"
+          curl -fLo download/mariadb.zip "https://mirror.djvg.sg/mariadb///mariadb-12.3.2/winx64-packages/mariadb-12.3.2-winx64.zip"
 
       - name: Resolve latest tag
         id: tag
@@ -115,7 +115,7 @@ jobs:
         shell: bash
         run: |
           cd stage
-          zip -q -1 "$GITHUB_WORKSPACE/werd-windows-x64.zip" "werd-${{ steps.tag.outputs.tag }}"
+          zip -q -1 -r "$GITHUB_WORKSPACE/werd-windows-x64.zip" "werd-${{ steps.tag.outputs.tag }}"
 
       - name: Replace asset on latest release
         env:
