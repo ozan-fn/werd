@@ -453,6 +453,7 @@ func copyConfigs() {
 	copyConfig(filepath.Join(root, "config", "httpd.conf"), filepath.Join(httpdRoot, "conf", "httpd.conf"))
 	copyConfig(filepath.Join(root, "config", "php.ini"), filepath.Join(root, "bin", "php-8.4.23-Win32-vs17-x64", "php.ini"))
 	copyConfig(filepath.Join(root, "config", "my.ini"), filepath.Join(root, "bin", "mariadb-12.3.2-winx64", "my.ini"))
+	copyConfig(filepath.Join(root, "config", "config.inc.php"), filepath.Join(root, "bin", "phpMyAdmin-5.2.3-english", "config.inc.php"))
 }
 
 func main() {
