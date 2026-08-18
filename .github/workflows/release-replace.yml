@@ -40,7 +40,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y upx-ucl
 
       - name: Build werd.exe
-        run: go build -ldflags "-s -w" -o werd.exe .
+        run: GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "-s -w" -o werd.exe .
 
       - name: Compress werd.exe
         run: upx --best --lzma werd.exe
@@ -81,7 +81,7 @@ jobs:
           mkdir -p "$W/bin" "$W/var/logs"
 
           unzip -q download/httpd.zip -d "$W/bin"
-          unzip -q download/php.zip   -d "$W/bin"
+          unzip -q download/php.zip   -d "$W/bin/php-extract"
           unzip -q download/pma.zip   -d "$W/bin"
 
           if [ -d "$W/bin/Apache24" ]; then
@@ -89,9 +89,7 @@ jobs:
             mv "$W/bin/Apache24" "$W/bin/httpd-2.4.66-251206-Win64-VS17/Apache24"
           fi
 
-          if [ -d "$W/bin/php-8.4.24-Win32-vs17-x64" ]; then
-            mv "$W/bin/php-8.4.24-Win32-vs17-x64" "$W/bin/php-8.4.23-Win32-vs17-x64"
-          fi
+          mv "$W/bin/php-extract" "$W/bin/php-8.4.23-Win32-vs17-x64"
 
           cp -r config "$W/config"
           cp werd.exe README.md "$W/"
