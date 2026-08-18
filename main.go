@@ -584,6 +584,18 @@ func phpDir() string {
 	return filepath.Join(root, "bin", "php-8.4.23-Win32-vs17-x64")
 }
 
+func mysqlDir() string {
+	return filepath.Join(root, "bin", "mysql-8.4.11-winx64", "bin")
+}
+
+func configDir() string {
+	return filepath.Join(root, "config")
+}
+
+func pathDirs() []string {
+	return []string{configDir(), phpDir(), mysqlDir()}
+}
+
 func phpInUserPath() bool {
 	k, err := registry.OpenKey(registry.CURRENT_USER, `Environment`, registry.QUERY_VALUE)
 	if err != nil {
@@ -594,7 +606,13 @@ func phpInUserPath() bool {
 	if err != nil {
 		return false
 	}
-	return strings.Contains(strings.ToLower(v), strings.ToLower(phpDir()))
+	low := strings.ToLower(v)
+	for _, d := range pathDirs() {
+		if !strings.Contains(low, strings.ToLower(d)) {
+			return false
+		}
+	}
+	return true
 }
 
 func setPhpInUserPath(on bool) {
@@ -607,13 +625,17 @@ func setPhpInUserPath(on bool) {
 	cur, _, _ := k.GetStringValue("Path")
 	parts := strings.Split(cur, ";")
 	var keep []string
+	remove := map[string]bool{}
+	for _, d := range pathDirs() {
+		remove[strings.ToLower(d)] = true
+	}
 	for _, p := range parts {
-		if p != "" && strings.ToLower(p) != strings.ToLower(phpDir()) {
+		if p != "" && !remove[strings.ToLower(p)] {
 			keep = append(keep, p)
 		}
 	}
 	if on {
-		keep = append([]string{phpDir()}, keep...)
+		keep = append(pathDirs(), keep...)
 	}
 	if err := k.SetStringValue("Path", strings.Join(keep, ";")); err != nil {
 		log.Printf("[path] set: %v", err)
