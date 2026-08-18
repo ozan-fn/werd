@@ -23,6 +23,7 @@ import (
 	"github.com/gogpu/systray"
 	"github.com/gorilla/websocket"
 	"github.com/sqweek/dialog"
+	"golang.org/x/sys/windows/registry"
 )
 
 //go:embed all:web/dist
@@ -217,6 +218,11 @@ func (c *client) readPump() {
 			c.sendTo(map[string]any{"type": "projects", "projects": loadProjects()})
 		case "pickFolder":
 			c.sendTo(map[string]any{"type": "folderPicked", "path": pickFolder()})
+		case "getPhpPath":
+			c.sendTo(map[string]any{"type": "phpPath", "on": phpInUserPath()})
+		case "setPhpPath":
+			setPhpInUserPath(m.Path == "on")
+			c.sendTo(map[string]any{"type": "phpPath", "on": phpInUserPath()})
 		}
 	}
 }
@@ -574,8 +580,49 @@ func writeVhosts() {
 	}
 }
 
+func phpDir() string {
+	return filepath.Join(root, "bin", "php-8.4.23-Win32-vs17-x64")
+}
+
+func phpInUserPath() bool {
+	k, err := registry.OpenKey(registry.CURRENT_USER, `Environment`, registry.QUERY_VALUE)
+	if err != nil {
+		return false
+	}
+	defer k.Close()
+	v, _, err := k.GetStringValue("Path")
+	if err != nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(v), strings.ToLower(phpDir()))
+}
+
+func setPhpInUserPath(on bool) {
+	k, err := registry.OpenKey(registry.CURRENT_USER, `Environment`, registry.SET_VALUE|registry.QUERY_VALUE)
+	if err != nil {
+		log.Printf("[path] open: %v", err)
+		return
+	}
+	defer k.Close()
+	cur, _, _ := k.GetStringValue("Path")
+	parts := strings.Split(cur, ";")
+	var keep []string
+	for _, p := range parts {
+		if p != "" && strings.ToLower(p) != strings.ToLower(phpDir()) {
+			keep = append(keep, p)
+		}
+	}
+	if on {
+		keep = append([]string{phpDir()}, keep...)
+	}
+	if err := k.SetStringValue("Path", strings.Join(keep, ";")); err != nil {
+		log.Printf("[path] set: %v", err)
+	}
+}
+
 func copyConfigs() {
 	os.MkdirAll(logDir, 0755)
+	os.MkdirAll(filepath.Join(root, "var", "www"), 0755)
 	copyConfig(filepath.Join(root, "config", "httpd.conf"), filepath.Join(httpdRoot, "conf", "httpd.conf"))
 	copyConfig(filepath.Join(root, "config", "php.ini"), filepath.Join(root, "bin", "php-8.4.23-Win32-vs17-x64", "php.ini"))
 	copyConfig(filepath.Join(root, "config", "my.ini"), filepath.Join(root, "bin", "mysql-8.4.11-winx64", "my.ini"))

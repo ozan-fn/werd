@@ -7,7 +7,7 @@ type Procs = { apache: Proc[]; mariadb: Proc[] };
 
 type LogEntry = { service: 'apache' | 'mariadb' | 'system'; line: string };
 
-const tabs = ['Services', 'Projects', 'Databases', 'Config', 'About'] as const;
+const tabs = ['Services', 'Projects', 'Databases', 'Config', 'Path', 'About'] as const;
 type Tab = (typeof tabs)[number];
 
 const dbs = ['app_werd', 'blog'];
@@ -111,6 +111,7 @@ export const App = () => {
         {tab === 'Projects' && <Projects projects={projects} ws={wsRef} />}
         {tab === 'Databases' && <Databases />}
         {tab === 'Config' && <Config />}
+        {tab === 'Path' && <PathPane ws={wsRef} />}
         {tab === 'About' && <About />}
         <Logs logs={logs} />
       </div>
@@ -539,6 +540,44 @@ const Config = () => (
     </div>
   </div>
 );
+
+const PathPane = ({ ws }: { ws: { current: WebSocket | null } }) => {
+  const [on, setOn] = useState(false);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    ws.current?.send(JSON.stringify({ action: 'getPhpPath' }));
+    const h = (ev: any) => {
+      let msg: any;
+      try { msg = JSON.parse(ev.data); } catch { return; }
+      if (msg.type === 'phpPath') setOn(!!msg.on);
+    };
+    ws.current?.addEventListener('message', h);
+    return () => ws.current?.removeEventListener('message', h);
+  }, [ws]);
+  const toggle = () => {
+    setBusy(true);
+    ws.current?.send(JSON.stringify({ action: 'setPhpPath', path: on ? 'off' : 'on' }));
+    setTimeout(() => setBusy(false), 500);
+  };
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+      <h2 className="mb-1 text-sm font-semibold text-zinc-100">PHP in user PATH</h2>
+      <p className="mb-3 text-xs text-zinc-400">
+        Add/remove this PHP to your Windows user environment PATH so <code className="text-zinc-300">php</code> is available in every terminal.
+      </p>
+      <button
+        onClick={toggle}
+        disabled={busy}
+        className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+          on ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-zinc-700 text-zinc-200 hover:bg-zinc-600'
+        } disabled:opacity-60`}
+      >
+        {on ? 'Enabled — click to remove' : 'Disabled — click to enable'}
+      </button>
+      <p className="mt-3 text-xs text-zinc-500">Applies to new terminal/processes. Restart your shell after toggling.</p>
+    </div>
+  );
+};
 
 const About = () => (
   <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">

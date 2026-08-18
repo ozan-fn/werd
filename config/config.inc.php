@@ -15,6 +15,6 @@ $cfg['Servers'][$i]['hide_db'] = '^(information_schema|performance_schema|phpmya
 $cfg['UploadDir'] = '';
 $cfg['SaveDir'] = '';
 
-$cfg['PmaAbsoluteUri'] = 'http://127.0.0.1:8080/';
+$cfg['PmaAbsoluteUri'] = 'http://localhost/phpmyadmin/';
 $cfg['ShowServerInfo'] = true;
 $cfg['VersionCheck'] = false;
