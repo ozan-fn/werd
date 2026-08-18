@@ -6,6 +6,8 @@ untuk Windows.
 > **Moto** — Hanya mengubah yang ada di dalam folder. 100% tidak ada setting
 > atau penaruhan file ke luar folder.
 
+![WERD Panel](./ss.png)
+
 ## Versi yang Disertakan
 
 | Komponen   | Versi                                  | Keterangan          |
