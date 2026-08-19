@@ -10,6 +10,10 @@ export function CAInstalled() {
   return window['go']['main']['App']['CAInstalled']();
 }
 
+export function DeleteCA() {
+  return window['go']['main']['App']['DeleteCA']();
+}
+
 export function GetAutostart() {
   return window['go']['main']['App']['GetAutostart']();
 }
@@ -84,10 +88,6 @@ export function Stop(arg1) {
 
 export function StopAll() {
   return window['go']['main']['App']['StopAll']();
-}
-
-export function DeleteCA() {
-  return window['go']['main']['App']['DeleteCA']();
 }
 
 export function UninstallSSL(arg1) {

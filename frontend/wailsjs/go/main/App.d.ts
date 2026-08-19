@@ -6,6 +6,8 @@ export function AddProject(arg1:string,arg2:string):Promise<Array<main.Project>>
 
 export function CAInstalled():Promise<boolean>;
 
+export function DeleteCA():Promise<boolean>;
+
 export function GetAutostart():Promise<boolean>;
 
 export function GetPhpPath():Promise<boolean>;
@@ -43,8 +45,6 @@ export function StartAll():Promise<void>;
 export function Stop(arg1:string):Promise<void>;
 
 export function StopAll():Promise<void>;
-
-export function DeleteCA():Promise<boolean>;
 
 export function UninstallSSL(arg1:string):Promise<Array<main.Project>>;
 
