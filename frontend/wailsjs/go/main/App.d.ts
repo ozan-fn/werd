@@ -44,7 +44,7 @@ export function Stop(arg1:string):Promise<void>;
 
 export function StopAll():Promise<void>;
 
-export function UninstallCA():Promise<boolean>;
+export function DeleteCA():Promise<boolean>;
 
 export function UninstallSSL(arg1:string):Promise<Array<main.Project>>;
 

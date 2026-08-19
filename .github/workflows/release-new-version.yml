@@ -74,18 +74,17 @@ jobs:
         uses: actions/cache@v4
         with:
           path: download
-          key: werd-packages-v3
+          key: werd-packages-v4
 
       - name: Download packages
-        if: steps.cache-pkg.outputs.cache-hit != 'true'
         run: |
           mkdir -p download
-          curl -fLo download/httpd.zip "https://www.apachelounge.com/download/VS17/binaries/httpd-2.4.66-251206-Win64-VS17.zip"
-          curl -fLo download/php.zip "https://downloads.php.net/~windows/releases/php-8.4.24-Win32-vs17-x64.zip"
-          curl -fLo download/pma.zip "https://files.phpmyadmin.net/phpMyAdmin/5.2.3/phpMyAdmin-5.2.3-english.zip"
-          curl -fLo download/mysql.zip "https://cdn.mysql.com//Downloads/MySQL-8.4/mysql-8.4.11-winx64.zip"
-          curl -fLo download/mkcert.exe "https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.4.4-windows-amd64.exe"
-          curl -fLo download/composer.phar "https://getcomposer.org/download/2.10.2/composer.phar"
+          [ -s download/httpd.zip ] || curl -fLo download/httpd.zip "https://www.apachelounge.com/download/VS17/binaries/httpd-2.4.66-251206-Win64-VS17.zip"
+          [ -s download/php.zip ] || curl -fLo download/php.zip "https://downloads.php.net/~windows/releases/php-8.4.24-Win32-vs17-x64.zip"
+          [ -s download/pma.zip ] || curl -fLo download/pma.zip "https://files.phpmyadmin.net/phpMyAdmin/5.2.3/phpMyAdmin-5.2.3-english.zip"
+          [ -s download/mysql.zip ] || curl -fLo download/mysql.zip "https://cdn.mysql.com//Downloads/MySQL-8.4/mysql-8.4.11-winx64.zip"
+          [ -s download/mkcert.exe ] || curl -fLo download/mkcert.exe "https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.4.4-windows-amd64.exe"
+          [ -s download/composer.phar ] || curl -fLo download/composer.phar "https://getcomposer.org/download/2.10.2/composer.phar"
 
       - name: Compute next version
         id: ver

@@ -86,8 +86,8 @@ export function StopAll() {
   return window['go']['main']['App']['StopAll']();
 }
 
-export function UninstallCA() {
-  return window['go']['main']['App']['UninstallCA']();
+export function DeleteCA() {
+  return window['go']['main']['App']['DeleteCA']();
 }
 
 export function UninstallSSL(arg1) {

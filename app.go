@@ -468,11 +468,21 @@ func (a *App) InstallCA() bool {
 	return a.CAInstalled()
 }
 
-func (a *App) UninstallCA() bool {
-	if err := a.runMkcert("-uninstall"); err != nil && a.CAInstalled() {
+func (a *App) DeleteCA() bool {
+	_ = a.runMkcert("-uninstall")
+	out, err := noWindow(exec.Command(a.mkcertBin(), "-CAROOT")).Output()
+	if err != nil {
 		a.emit("error", map[string]any{"service": "ssl", "message": err.Error()})
+		return false
 	}
-	return a.CAInstalled()
+	root := strings.TrimSpace(string(out))
+	for _, f := range []string{"rootCA.pem", "rootCA-key.pem"} {
+		if err := os.Remove(filepath.Join(root, f)); err != nil && !os.IsNotExist(err) {
+			a.emit("error", map[string]any{"service": "ssl", "message": err.Error()})
+			return false
+		}
+	}
+	return true
 }
 
 func (a *App) InstallSSL(id string) []Project {

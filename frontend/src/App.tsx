@@ -5,7 +5,7 @@ import {
   ListProjects, AddProject, UpdateHost, RemoveProject, PickFolder,
   GetPhpPath, SetPhpPath, OpenURL,
   ListDatabases, GetAutostart, SetAutostart, OpenInExplorer,
-  InstallSSL, UninstallSSL, CAInstalled, InstallCA, UninstallCA,
+  InstallSSL, UninstallSSL, DeleteCA,
   MySQLInstalled, InstallMySQL,
 } from '../wailsjs/go/main/App';
 import './app.css';
@@ -716,18 +716,7 @@ const configFiles = [
 ];
 
 const Config = () => {
-  const [ca, setCa] = useState(false);
   const [caBusy, setCaBusy] = useState(false);
-  useEffect(() => {
-    CAInstalled().then(setCa);
-  }, []);
-  const toggleCA = async () => {
-    setCaBusy(true);
-    if (ca) await UninstallCA();
-    else await InstallCA();
-    setCa(await CAInstalled());
-    setCaBusy(false);
-  };
   return (
     <div className="flex flex-col gap-4">
       <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
@@ -742,30 +731,21 @@ const Config = () => {
       <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
         <h2 className="mb-1 text-sm font-semibold text-zinc-100">Local CA (SSL)</h2>
         <p className="mb-3 text-xs text-zinc-400">
-          CA lokal (mkcert) ditanam ke trusted store Windows sehingga sertifikat
-          localhost / domain project dipercaya tanpa peringatan browser.
+          CA lokal (mkcert) dipakai menerbitkan sertifikat SSL untuk localhost dan
+          domain project. Menghapusnya membuat sertifikat SSL yang sudah terbit
+          tidak lagi dipercaya browser; akan dibuat baru otomatis saat SSL di-install.
         </p>
-        <div className="flex items-center justify-between">
-          <span
-            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ${
-              ca ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'
-            }`}
-          >
-            <span className={`size-2 rounded-full ${ca ? 'bg-emerald-400' : 'bg-red-400'}`} />
-            {ca ? 'CA installed' : 'CA not installed'}
-          </span>
-          <button
-            onClick={toggleCA}
-            disabled={caBusy}
-            className={`rounded-lg border px-3 py-1.5 text-xs font-medium disabled:opacity-50 ${
-              ca
-                ? 'border-red-800 text-red-400 hover:bg-red-950'
-                : 'border-emerald-700 text-emerald-400 hover:bg-emerald-950'
-            }`}
-          >
-            {caBusy ? '...' : ca ? 'Uninstall CA' : 'Install CA'}
-          </button>
-        </div>
+        <button
+          onClick={async () => {
+            setCaBusy(true);
+            await DeleteCA();
+            setCaBusy(false);
+          }}
+          disabled={caBusy}
+          className="rounded-lg border border-red-800 px-3 py-1.5 text-xs font-medium text-red-400 hover:bg-red-950 disabled:opacity-50"
+        >
+          {caBusy ? '...' : 'Delete all WERD CA'}
+        </button>
       </div>
       <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
         <h2 className="mb-2 text-sm font-semibold text-zinc-100">Config files</h2>
