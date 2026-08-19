@@ -39,17 +39,15 @@ jobs:
         id: cache-wails
         uses: actions/cache@v4
         with:
-          path: ~/go-wails/bin
+          path: ~/go/bin
           key: wails-cli-v2.15.0
 
       - name: Install Wails CLI
         if: steps.cache-wails.outputs.cache-hit != 'true'
-        env:
-          GOBIN: ~/go-wails/bin
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0
 
       - name: Add Wails CLI to PATH
-        run: echo "$HOME/go-wails/bin" >> "$GITHUB_PATH"
+        run: echo "$HOME/go/bin" >> "$GITHUB_PATH"
 
       - name: Cache node_modules
         id: cache-nm
