@@ -6,12 +6,44 @@ export function AddProject(arg1, arg2) {
   return window['go']['main']['App']['AddProject'](arg1, arg2);
 }
 
+export function CAInstalled() {
+  return window['go']['main']['App']['CAInstalled']();
+}
+
+export function GetAutostart() {
+  return window['go']['main']['App']['GetAutostart']();
+}
+
 export function GetPhpPath() {
   return window['go']['main']['App']['GetPhpPath']();
 }
 
+export function InstallCA() {
+  return window['go']['main']['App']['InstallCA']();
+}
+
+export function InstallMySQL() {
+  return window['go']['main']['App']['InstallMySQL']();
+}
+
+export function InstallSSL(arg1) {
+  return window['go']['main']['App']['InstallSSL'](arg1);
+}
+
+export function ListDatabases() {
+  return window['go']['main']['App']['ListDatabases']();
+}
+
 export function ListProjects() {
   return window['go']['main']['App']['ListProjects']();
+}
+
+export function MySQLInstalled() {
+  return window['go']['main']['App']['MySQLInstalled']();
+}
+
+export function OpenInExplorer(arg1) {
+  return window['go']['main']['App']['OpenInExplorer'](arg1);
 }
 
 export function OpenURL(arg1) {
@@ -28,6 +60,10 @@ export function RemoveProject(arg1) {
 
 export function Restart(arg1) {
   return window['go']['main']['App']['Restart'](arg1);
+}
+
+export function SetAutostart(arg1) {
+  return window['go']['main']['App']['SetAutostart'](arg1);
 }
 
 export function SetPhpPath(arg1) {
@@ -50,6 +86,14 @@ export function StopAll() {
   return window['go']['main']['App']['StopAll']();
 }
 
-export function UpdateUrl(arg1, arg2) {
-  return window['go']['main']['App']['UpdateUrl'](arg1, arg2);
+export function UninstallCA() {
+  return window['go']['main']['App']['UninstallCA']();
+}
+
+export function UninstallSSL(arg1) {
+  return window['go']['main']['App']['UninstallSSL'](arg1);
+}
+
+export function UpdateHost(arg1, arg2) {
+  return window['go']['main']['App']['UpdateHost'](arg1, arg2);
 }

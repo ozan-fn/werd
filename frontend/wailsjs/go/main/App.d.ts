@@ -4,9 +4,25 @@ import {main} from '../models';
 
 export function AddProject(arg1:string,arg2:string):Promise<Array<main.Project>>;
 
+export function CAInstalled():Promise<boolean>;
+
+export function GetAutostart():Promise<boolean>;
+
 export function GetPhpPath():Promise<boolean>;
 
+export function InstallCA():Promise<boolean>;
+
+export function InstallMySQL():Promise<boolean>;
+
+export function InstallSSL(arg1:string):Promise<Array<main.Project>>;
+
+export function ListDatabases():Promise<Array<string>>;
+
 export function ListProjects():Promise<Array<main.Project>>;
+
+export function MySQLInstalled():Promise<boolean>;
+
+export function OpenInExplorer(arg1:string):Promise<void>;
 
 export function OpenURL(arg1:string):Promise<void>;
 
@@ -15,6 +31,8 @@ export function PickFolder():Promise<string>;
 export function RemoveProject(arg1:string):Promise<Array<main.Project>>;
 
 export function Restart(arg1:string):Promise<void>;
+
+export function SetAutostart(arg1:boolean):Promise<boolean>;
 
 export function SetPhpPath(arg1:boolean):Promise<boolean>;
 
@@ -26,4 +44,8 @@ export function Stop(arg1:string):Promise<void>;
 
 export function StopAll():Promise<void>;
 
-export function UpdateUrl(arg1:string,arg2:string):Promise<Array<main.Project>>;
+export function UninstallCA():Promise<boolean>;
+
+export function UninstallSSL(arg1:string):Promise<Array<main.Project>>;
+
+export function UpdateHost(arg1:string,arg2:string):Promise<Array<main.Project>>;

@@ -8,8 +8,22 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
+	"unsafe"
 
 	"golang.org/x/sys/windows/registry"
+)
+
+var (
+	user32                = syscall.NewLazyDLL("user32.dll")
+	procFindWindowW       = user32.NewProc("FindWindowW")
+	procGetWindowLongPtrW = user32.NewProc("GetWindowLongPtrW")
+	procSetWindowLongPtrW = user32.NewProc("SetWindowLongPtrW")
+)
+
+const (
+	gwlExStyle     = 0xFFFFFFFFFFFFFFEC
+	wsExToolWindow = 0x00000080
 )
 
 func noWindow(cmd *exec.Cmd) *exec.Cmd {
@@ -17,20 +31,33 @@ func noWindow(cmd *exec.Cmd) *exec.Cmd {
 	return cmd
 }
 
+func hideFromTaskbar() {
+	for i := 0; i < 5; i++ {
+		name, _ := syscall.UTF16PtrFromString("WERD Panel")
+		h, _, _ := procFindWindowW.Call(0, uintptr(unsafe.Pointer(name)))
+		if h != 0 {
+			style, _, _ := procGetWindowLongPtrW.Call(h, uintptr(gwlExStyle))
+			procSetWindowLongPtrW.Call(h, uintptr(gwlExStyle), style|wsExToolWindow)
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
 func phpDir(root string) string {
-	return filepath.Join(root, "bin", "php-8.4.23-Win32-vs17-x64")
+	return filepath.Join(root, "bin", "php-8.4.24-Win32-vs17-x64")
 }
 
 func mysqlDir(root string) string {
 	return filepath.Join(root, "bin", "mysql-8.4.11-winx64", "bin")
 }
 
-func configDir(root string) string {
-	return filepath.Join(root, "config")
+func composerDir(root string) string {
+	return filepath.Join(root, "bin", "composer-2.10.2")
 }
 
 func pathDirs(root string) []string {
-	return []string{configDir(root), phpDir(root), mysqlDir(root)}
+	return []string{composerDir(root), phpDir(root), mysqlDir(root)}
 }
 
 func phpInUserPath(root string) bool {

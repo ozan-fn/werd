@@ -84,6 +84,8 @@ jobs:
           curl -fLo download/php.zip "https://downloads.php.net/~windows/releases/php-8.4.24-Win32-vs17-x64.zip"
           curl -fLo download/pma.zip "https://files.phpmyadmin.net/phpMyAdmin/5.2.3/phpMyAdmin-5.2.3-english.zip"
           curl -fLo download/mysql.zip "https://cdn.mysql.com//Downloads/MySQL-8.4/mysql-8.4.11-winx64.zip"
+          curl -fLo download/mkcert.exe "https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.4.4-windows-amd64.exe"
+          curl -fLo download/composer.phar "https://getcomposer.org/download/2.10.2/composer.phar"
 
       - name: Compute next version
         id: ver
@@ -109,7 +111,24 @@ jobs:
           set -eux
           STAGE="$GITHUB_WORKSPACE/stage"
           W="$STAGE/werd-${{ steps.ver.outputs.tag }}"
-          mkdir -p "$W/bin" "$W/var/logs"
+          mkdir -p "$W/bin" "$W/var/logs" "$W/var/tools"
+
+          cp download/mkcert.exe "$W/var/tools/mkcert.exe"
+
+          mkdir -p "$W/bin/composer-2.10.2"
+          cp download/composer.phar "$W/bin/composer-2.10.2/composer.phar"
+          sed 's/^          //' > "$W/bin/composer-2.10.2/composer.bat" <<'EOF'
+          @ECHO OFF
+          setlocal
+          SET DP0=%~dp0
+          IF EXIST "%DP0%\..\php-8.4.24-Win32-vs17-x64\php.exe" (
+            SET "PHP_EXE=%DP0%\..\php-8.4.24-Win32-vs17-x64\php.exe"
+          ) ELSE (
+            SET "PHP_EXE=php"
+          )
+          "%PHP_EXE%" "%DP0%\composer.phar" %*
+          endlocal
+          EOF
 
           unzip -q download/httpd.zip -d "$W/bin"
           unzip -q download/php.zip   -d "$W/bin/php-extract"
@@ -121,7 +140,7 @@ jobs:
             mv "$W/bin/Apache24" "$W/bin/httpd-2.4.66-251206-Win64-VS17/Apache24"
           fi
 
-          mv "$W/bin/php-extract" "$W/bin/php-8.4.23-Win32-vs17-x64"
+          mv "$W/bin/php-extract" "$W/bin/php-8.4.24-Win32-vs17-x64"
 
           cp -r config "$W/config"
           cp build/bin/werd.exe "$W/werd.exe"
@@ -132,7 +151,10 @@ jobs:
         shell: bash
         run: |
           cd stage
-          zip -q -1 -r "$GITHUB_WORKSPACE/werd-windows-x64.zip" "werd-${{ steps.ver.outputs.tag }}"
+          W="werd-${{ steps.ver.outputs.tag }}"
+          zip -q -1 -r "$GITHUB_WORKSPACE/werd-windows-x64.zip" "$W"
+          rm -rf "$W/bin/mysql-8.4.11-winx64"
+          zip -q -1 -r "$GITHUB_WORKSPACE/werd-windows-x64-nomysql.zip" "$W"
 
       - name: Create release + upload
         uses: softprops/action-gh-release@v3
@@ -145,5 +167,6 @@ jobs:
             > Extract so that `bin` lands at `E:\werd\bin`.
           files: |
             werd-windows-x64.zip
+            werd-windows-x64-nomysql.zip
             build/bin/werd.exe
           generate_release_notes: true

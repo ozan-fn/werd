@@ -2,8 +2,11 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime';
 import {
   Start, Stop, Restart, StartAll, StopAll,
-  ListProjects, AddProject, UpdateUrl, RemoveProject, PickFolder,
+  ListProjects, AddProject, UpdateHost, RemoveProject, PickFolder,
   GetPhpPath, SetPhpPath, OpenURL,
+  ListDatabases, GetAutostart, SetAutostart, OpenInExplorer,
+  InstallSSL, UninstallSSL, CAInstalled, InstallCA, UninstallCA,
+  MySQLInstalled, InstallMySQL,
 } from '../wailsjs/go/main/App';
 import './app.css';
 
@@ -13,13 +16,10 @@ type Procs = { apache: Proc[]; mariadb: Proc[] };
 
 type LogEntry = { service: 'apache' | 'mariadb' | 'system'; line: string };
 
-type Project = { id: string; path: string; url: string };
+type Project = { id: string; path: string; host: string; ssl: boolean };
 
 const tabs = ['Services', 'Projects', 'Databases', 'Config', 'Path', 'About'] as const;
 type Tab = (typeof tabs)[number];
-
-const dbs = ['app_werd', 'blog'];
-const ports = ['80 (httpd)', '3306 (mysql)'];
 
 export const App = () => {
   const [tab, setTab] = useState<Tab>(() => (localStorage.getItem('werd-tab') as Tab) || 'Services');
@@ -36,6 +36,7 @@ export const App = () => {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [connected, setConnected] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [mysqlInstalled, setMysqlInstalled] = useState(true);
 
   useEffect(() => {
     const onStatus = (msg: { service: 'apache' | 'mariadb'; running: boolean; procs?: Proc[] }) => {
@@ -43,8 +44,10 @@ export const App = () => {
       setProcs((p) => ({ ...p, [msg.service]: msg.procs || [] }));
       setLoading((l) => ({ ...l, [msg.service]: false }));
     };
-    const onLog = (msg: { service: 'apache' | 'mariadb'; line: string }) =>
+    const onLog = (msg: { service: 'apache' | 'mariadb'; line: string }) => {
+      if (!/error|fatal|fail|exception/i.test(msg.line)) return;
       setLogs((l) => [...l.slice(-199), { service: msg.service, line: msg.line }]);
+    };
     const onError = (msg: { service?: string; message: string }) =>
       setLogs((l) => [...l.slice(-199), { service: 'system', line: `[error] ${msg.message}` }]);
     const onProjects = (msg: { projects: Project[] }) => setProjects(msg.projects || []);
@@ -55,6 +58,7 @@ export const App = () => {
     EventsOn('projects', onProjects);
     setConnected(true);
     ListProjects().then(setProjects);
+    MySQLInstalled().then(setMysqlInstalled);
     return () => {
       EventsOff('status', 'log', 'error', 'projects');
     };
@@ -70,14 +74,16 @@ export const App = () => {
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 antialiased">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 py-8">
-        <Header running={connected && status.apache && status.mariadb} connected={connected} />
+        <Header running={connected && status.apache && (mysqlInstalled ? status.mariadb : true)} connected={connected} />
         <Tabs current={tab} onSelect={changeTab} />
         {tab === 'Services' && (
           <Services
             status={status}
             procs={procs}
             loading={loading}
+            mysqlInstalled={mysqlInstalled}
             onControl={control}
+            onInstalled={async () => setMysqlInstalled(await MySQLInstalled())}
             onAll={(a) => {
               setLoading({ apache: true, mariadb: true });
               if (a === 'startAll') StartAll();
@@ -85,12 +91,12 @@ export const App = () => {
             }}
           />
         )}
-        {tab === 'Projects' && <Projects projects={projects} />}
+        {tab === 'Projects' && <Projects projects={projects} onChange={setProjects} />}
         {tab === 'Databases' && <Databases />}
         {tab === 'Config' && <Config />}
         {tab === 'Path' && <PathPane />}
         {tab === 'About' && <About />}
-        <Logs logs={logs} />
+        {logs.length > 0 && <Logs logs={logs} />}
       </div>
     </div>
   );
@@ -205,20 +211,108 @@ const ServiceCard = ({
   </div>
 );
 
+const MySQLCard = ({
+  running,
+  procs,
+  loading,
+  installed,
+  onControl,
+  onInstall,
+  progress,
+}: {
+  running: boolean;
+  procs: Proc[];
+  loading: boolean;
+  installed: boolean;
+  onControl: (a: 'start' | 'stop' | 'restart') => void;
+  onInstall: () => void;
+  progress: { active: boolean; pct: number; text: string };
+}) => {
+  if (!installed) {
+    return (
+      <div className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+        <div className="flex items-center gap-3">
+          <span className="size-2.5 rounded-full bg-zinc-600" />
+          <div>
+            <div className="text-sm font-medium text-zinc-100">MySQL</div>
+            <div className="text-xs text-zinc-400">8.4.11 · port 3306 — belum terinstall</div>
+          </div>
+        </div>
+        {progress.active ? (
+          <div className="flex flex-col items-end gap-1">
+            <div className="h-1.5 w-48 overflow-hidden rounded-full bg-zinc-800">
+              <div
+                className="h-full bg-emerald-500 transition-all"
+                style={{ width: `${progress.pct}%` }}
+              />
+            </div>
+            <span className="text-[11px] text-zinc-500">{progress.text}</span>
+          </div>
+        ) : (
+          <button
+            onClick={onInstall}
+            className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-emerald-950 hover:bg-emerald-500"
+          >
+            Install MySQL
+          </button>
+        )}
+      </div>
+    );
+  }
+  return (
+    <ServiceCard
+      name="MySQL"
+      version="8.4.11"
+      port="3306"
+      dir="bin/mysql-8.4.11"
+      running={running}
+      procs={procs}
+      loading={loading}
+      onControl={onControl}
+    />
+  );
+};
+
 const Services = ({
   status,
   procs,
   loading,
+  mysqlInstalled,
   onControl,
+  onInstalled,
   onAll,
 }: {
   status: Status;
   procs: Procs;
   loading: { apache: boolean; mariadb: boolean };
+  mysqlInstalled: boolean;
   onControl: (s: 'apache' | 'mariadb', a: 'start' | 'stop' | 'restart') => void;
+  onInstalled: () => void;
   onAll: (a: 'startAll' | 'stopAll') => void;
-}) => (
-  <div className="grid gap-4">
+}) => {
+  const [dl, setDl] = useState<{ active: boolean; pct: number; text: string }>({
+    active: false,
+    pct: 0,
+    text: '',
+  });
+  useEffect(() => {
+    const onP = (m: { done: number; total: number }) => {
+      const pct = m.total > 0 ? Math.min(100, Math.round((m.done / m.total) * 100)) : 0;
+      setDl({ active: true, pct, text: `Downloading MySQL… ${pct}%` });
+    };
+    EventsOn('mysql-progress', onP);
+    return () => {
+      EventsOff('mysql-progress');
+    };
+  }, []);
+  const install = async () => {
+    setDl({ active: true, pct: 0, text: 'Downloading MySQL… 0%' });
+    await InstallMySQL();
+    await onInstalled();
+    setDl({ active: false, pct: 100, text: '' });
+  };
+  return (
+    <div className="grid gap-4">
     <div className="flex items-center gap-2">
       <button
         disabled={loading.apache || loading.mariadb || (status.apache && status.mariadb)}
@@ -248,6 +342,7 @@ const Services = ({
       >
         Stop All
       </button>
+      <AutostartToggle />
     </div>
     <ServiceCard
       name="Apache"
@@ -259,22 +354,21 @@ const Services = ({
       loading={loading.apache}
       onControl={(a) => onControl('apache', a)}
     />
-    <ServiceCard
-      name="MySQL"
-      version="8.4.11"
-      port="3306"
-      dir="bin/mysql-8.4.11"
+    <MySQLCard
       running={status.mariadb}
       procs={procs.mariadb}
       loading={loading.mariadb}
+      installed={mysqlInstalled}
       onControl={(a) => onControl('mariadb', a)}
+      onInstall={install}
+      progress={dl}
     />
     <div className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900 p-4 opacity-60">
       <div className="flex items-center gap-3">
         <span className="size-2.5 rounded-full bg-emerald-500" />
         <div>
           <div className="text-sm font-medium text-zinc-100">PHP</div>
-          <div className="text-xs text-zinc-400">8.4.23 · mod_php</div>
+          <div className="text-xs text-zinc-400">8.4.24 · mod_php</div>
         </div>
       </div>
       <span className="text-xs text-zinc-500">via Apache</span>
@@ -295,11 +389,73 @@ const Services = ({
       </button>
     </div>
   </div>
-);
+  );
+};
 
-const Projects = ({ projects }: { projects: Project[] }) => {
+const AutostartToggle = () => {
+  const [on, setOn] = useState(false);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    GetAutostart().then(setOn);
+  }, []);
+  const toggle = async () => {
+    setBusy(true);
+    setOn(await SetAutostart(!on));
+    setBusy(false);
+  };
+  return (
+    <button
+      onClick={toggle}
+      disabled={busy}
+      title="Jalankan Apache & MySQL otomatis saat aplikasi dibuka"
+      className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium transition-colors disabled:opacity-60 ${
+        on
+          ? 'border-emerald-700 bg-emerald-600/15 text-emerald-300'
+          : 'border-zinc-700 text-zinc-400 hover:bg-zinc-800'
+      }`}
+    >
+      <span className={`size-2 rounded-full ${on ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
+      Auto-start on launch
+    </button>
+  );
+};
+
+const HostInput = ({
+  id,
+  host,
+  onChange,
+}: {
+  id: string;
+  host: string;
+  onChange: (ps: Project[]) => void;
+}) => {
+  const ref = useRef<HTMLInputElement>(null);
+  const commit = async () => {
+    const el = ref.current;
+    if (!el) return;
+    const v = el.value;
+    if (v === host) return;
+    onChange(await UpdateHost(id, v));
+  };
+  return (
+    <input
+      key={host}
+      ref={ref}
+      defaultValue={host}
+      onBlur={commit}
+      onKeyDown={(e: any) => {
+        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+      }}
+      placeholder="project.localhost"
+      className="w-full rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs text-zinc-300 outline-none focus:border-emerald-600"
+    />
+  );
+};
+
+const Projects = ({ projects, onChange }: { projects: Project[]; onChange: (ps: Project[]) => void }) => {
   const [picking, setPicking] = useState(false);
-  const [pending, setPending] = useState<{ path: string; url: string } | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [pending, setPending] = useState<{ path: string; host: string } | null>(null);
 
   const openExplorer = async () => {
     setPicking(true);
@@ -309,15 +465,17 @@ const Projects = ({ projects }: { projects: Project[] }) => {
     const parts = p.replace(/\\/g, '/').split('/').filter(Boolean);
     const folder = parts[parts.length - 1] || '';
     const host = folder.toLowerCase().replace(/[^a-z0-9.-]+/g, '-');
-    setPending({ path: p, url: `http://${host || 'project'}.localhost` });
+    setPending({ path: p, host: `${host || 'project'}.localhost` });
   };
 
   const save = async () => {
     if (!pending) return;
-    const ps = await AddProject(pending.path, pending.url);
-    setProjects(ps);
+    const ps = await AddProject(pending.path, pending.host);
+    onChange(ps);
     setPending(null);
   };
+
+  const projectURL = (p: Project) => `${p.ssl ? 'https' : 'http'}://${p.host}`;
 
   return (
     <div className="flex flex-col gap-4">
@@ -336,14 +494,15 @@ const Projects = ({ projects }: { projects: Project[] }) => {
           <thead className="border-b border-zinc-800 bg-zinc-900 text-xs text-zinc-500">
             <tr>
               <th className="px-4 py-2 font-medium">Path</th>
-              <th className="px-4 py-2 font-medium">URL</th>
+              <th className="px-4 py-2 font-medium">Domain</th>
+              <th className="px-4 py-2 font-medium">SSL</th>
               <th className="px-4 py-2 font-medium text-right">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-800 bg-zinc-950">
             {projects.length === 0 && (
               <tr>
-                <td className="px-4 py-4 text-xs text-zinc-500" colSpan={3}>
+                <td className="px-4 py-4 text-xs text-zinc-500" colSpan={4}>
                   Belum ada project. Klik + Add Project.
                 </td>
               </tr>
@@ -352,28 +511,48 @@ const Projects = ({ projects }: { projects: Project[] }) => {
               <tr key={p.id}>
                 <td className="px-4 py-2 text-xs text-zinc-300">{p.path}</td>
                 <td className="px-4 py-2">
-                  <input
-                    value={p.url}
-                    onChange={async (e: any) => {
-                      const ps = await UpdateUrl(p.id, e.target.value);
-                      setProjects(ps);
-                    }}
-                    placeholder="http://project.localhost"
-                    className="w-full rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs text-zinc-300 outline-none focus:border-emerald-600"
-                  />
+                  <HostInput id={p.id} host={p.host} onChange={onChange} />
+                </td>
+                <td className="px-4 py-2">
+                  {p.ssl ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-400">
+                      <span className="size-1.5 rounded-full bg-emerald-400" />
+                      https
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-zinc-700/20 px-2 py-0.5 text-[11px] text-zinc-500">
+                      http
+                    </span>
+                  )}
                 </td>
                 <td className="px-4 py-2 text-right">
                   <div className="flex justify-end gap-2">
                     <button
-                      onClick={() => OpenURL(p.url)}
+                      onClick={() => OpenURL(projectURL(p))}
                       className="rounded-lg border border-zinc-700 px-3 py-1 text-xs font-medium text-zinc-300 hover:bg-zinc-800"
                     >
                       Open
                     </button>
                     <button
+                      disabled={busyId === p.id}
+                      onClick={async () => {
+                        setBusyId(p.id);
+                        const ps = p.ssl ? await UninstallSSL(p.id) : await InstallSSL(p.id);
+                        setBusyId(null);
+                        onChange(ps);
+                      }}
+                      className={`rounded-lg border px-3 py-1 text-xs font-medium disabled:opacity-50 ${
+                        p.ssl
+                          ? 'border-emerald-800 text-emerald-400 hover:bg-emerald-950'
+                          : 'border-zinc-700 text-zinc-300 hover:bg-zinc-800'
+                      }`}
+                    >
+                      {busyId === p.id ? '...' : p.ssl ? 'Uninstall SSL' : 'Install SSL'}
+                    </button>
+                    <button
                       onClick={async () => {
                         const ps = await RemoveProject(p.id);
-                        setProjects(ps);
+                        onChange(ps);
                       }}
                       className="rounded-lg border border-red-800 px-3 py-1 text-xs font-medium text-red-400 hover:bg-red-950"
                     >
@@ -399,12 +578,17 @@ const Projects = ({ projects }: { projects: Project[] }) => {
               />
             </div>
             <div className="mb-4">
-              <label className="mb-1 block text-xs text-zinc-500">URL</label>
+              <label className="mb-1 block text-xs text-zinc-500">Domain</label>
               <input
-                value={pending.url}
-                onChange={(e: any) => setPending({ ...pending, url: e.target.value })}
+                value={pending.host}
+                onChange={(e: any) => setPending({ ...pending, host: e.target.value })}
+                placeholder="project.localhost"
                 className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-300 outline-none focus:border-emerald-600"
               />
+              <p className="mt-1 text-[11px] text-zinc-500">
+                Preview: {pending.host ? `http://${pending.host}` : '—'} · gunakan
+                *.localhost agar tak perlu edit file hosts.
+              </p>
             </div>
             <div className="flex justify-end gap-2">
               <button
@@ -439,8 +623,8 @@ const Logs = ({ logs }: { logs: LogEntry[] }) => {
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-950">
       <div className="flex items-center gap-2 border-b border-zinc-800 px-4 py-2 text-xs text-zinc-400">
-        <span className="size-1.5 rounded-full bg-zinc-500" />
-        Logs
+        <span className="size-1.5 rounded-full bg-red-500" />
+        Errors
       </div>
       <div
         ref={ref}
@@ -471,33 +655,143 @@ const Logs = ({ logs }: { logs: LogEntry[] }) => {
   );
 };
 
-const Databases = () => (
-  <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-    <div className="grid gap-2">
-      {dbs.map((db) => (
-        <div key={db} className="flex items-center justify-between rounded-lg px-2 py-2 hover:bg-zinc-800/60">
-          <span className="text-sm text-zinc-100">{db}</span>
-          <button className="rounded-lg border border-zinc-700 px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-800">
-            Open
+const Databases = () => {
+  const [dbs, setDbs] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const load = async () => {
+    setBusy(true);
+    setDbs(await ListDatabases());
+    setBusy(false);
+  };
+  useEffect(() => {
+    load();
+  }, []);
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-medium text-zinc-300">Databases</h2>
+        <button
+          onClick={load}
+          disabled={busy}
+          className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+        >
+          {busy ? 'Refreshing…' : 'Refresh'}
+        </button>
+      </div>
+      <div className="overflow-hidden rounded-lg border border-zinc-800">
+        {dbs.length === 0 ? (
+          <div className="px-4 py-4 text-xs text-zinc-500">
+            Tidak ada database — pastikan MySQL sudah jalan.
+          </div>
+        ) : (
+          dbs.map((db) => (
+            <div
+              key={db}
+              className="flex items-center justify-between border-b border-zinc-800 px-4 py-2 last:border-b-0 hover:bg-zinc-900"
+            >
+              <span className="text-sm text-zinc-100">{db}</span>
+              <button
+                onClick={() =>
+                  OpenURL(
+                    `http://localhost/phpmyadmin/index.php?route=/database/structure&db=${encodeURIComponent(db)}`
+                  )
+                }
+                className="rounded-lg border border-zinc-700 px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
+              >
+                Open
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+};
+
+const configFiles = [
+  ['Apache httpd.conf', 'config/httpd.conf'],
+  ['PHP php.ini', 'config/php.ini'],
+  ['MySQL my.ini', 'config/my.ini'],
+  ['phpMyAdmin config', 'config/config.inc.php'],
+];
+
+const Config = () => {
+  const [ca, setCa] = useState(false);
+  const [caBusy, setCaBusy] = useState(false);
+  useEffect(() => {
+    CAInstalled().then(setCa);
+  }, []);
+  const toggleCA = async () => {
+    setCaBusy(true);
+    if (ca) await UninstallCA();
+    else await InstallCA();
+    setCa(await CAInstalled());
+    setCaBusy(false);
+  };
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+        <h2 className="mb-2 text-sm font-semibold text-zinc-100">Stack</h2>
+        <div className="grid gap-1 text-sm text-zinc-300">
+          <div>Apache 2.4.66 · port 80 + 443</div>
+          <div>MySQL 8.4.11 · port 3306</div>
+          <div>PHP 8.4.24 · mod_php</div>
+          <div>phpMyAdmin 5.2.3 · /phpmyadmin</div>
+        </div>
+      </div>
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+        <h2 className="mb-1 text-sm font-semibold text-zinc-100">Local CA (SSL)</h2>
+        <p className="mb-3 text-xs text-zinc-400">
+          CA lokal (mkcert) ditanam ke trusted store Windows sehingga sertifikat
+          localhost / domain project dipercaya tanpa peringatan browser.
+        </p>
+        <div className="flex items-center justify-between">
+          <span
+            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ${
+              ca ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'
+            }`}
+          >
+            <span className={`size-2 rounded-full ${ca ? 'bg-emerald-400' : 'bg-red-400'}`} />
+            {ca ? 'CA installed' : 'CA not installed'}
+          </span>
+          <button
+            onClick={toggleCA}
+            disabled={caBusy}
+            className={`rounded-lg border px-3 py-1.5 text-xs font-medium disabled:opacity-50 ${
+              ca
+                ? 'border-red-800 text-red-400 hover:bg-red-950'
+                : 'border-emerald-700 text-emerald-400 hover:bg-emerald-950'
+            }`}
+          >
+            {caBusy ? '...' : ca ? 'Uninstall CA' : 'Install CA'}
           </button>
         </div>
-      ))}
-    </div>
-  </div>
-);
-
-const Config = () => (
-  <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-    <h2 className="mb-3 text-sm font-semibold text-zinc-100">Configuration</h2>
-    <div className="grid gap-2">
-      {ports.map((p) => (
-        <div key={p} className="rounded-lg px-2 py-1 text-sm text-zinc-300">
-          {p}
+      </div>
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+        <h2 className="mb-2 text-sm font-semibold text-zinc-100">Config files</h2>
+        <div className="grid gap-1">
+          {configFiles.map(([label, rel]) => (
+            <div
+              key={rel}
+              className="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-zinc-800/60"
+            >
+              <div>
+                <div className="text-sm text-zinc-100">{label}</div>
+                <div className="text-xs text-zinc-500">{rel}</div>
+              </div>
+              <button
+                onClick={() => OpenInExplorer(rel)}
+                className="rounded-lg border border-zinc-700 px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
+              >
+                Open
+              </button>
+            </div>
+          ))}
         </div>
-      ))}
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 const PathPane = () => {
   const [on, setOn] = useState(false);
@@ -518,8 +812,8 @@ const PathPane = () => {
       </p>
       <div className="mb-3 grid gap-2">
         {[
-          ['PHP', 'php', 'bin/php-8.4.23'],
-          ['Composer', 'composer', 'config/'],
+          ['PHP', 'php', 'bin/php-8.4.24'],
+          ['Composer', 'composer', 'bin/composer-2.10.2'],
           ['MySQL', 'mysql, mysqldump', 'bin/mysql-8.4.11/bin'],
         ].map(([name, cmds, dir]) => (
           <div key={name} className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-2">

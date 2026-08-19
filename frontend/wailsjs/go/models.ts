@@ -3,7 +3,8 @@ export namespace main {
 	export class Project {
 	    id: string;
 	    path: string;
-	    url: string;
+	    host: string;
+	    ssl: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new Project(source);
@@ -13,7 +14,8 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
 	        this.path = source["path"];
-	        this.url = source["url"];
+	        this.host = source["host"];
+	        this.ssl = source["ssl"];
 	    }
 	}
 

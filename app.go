@@ -1,12 +1,15 @@
 package main
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"math"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,8 +32,10 @@ type App struct {
 	httpdBin  string
 	mdbBinDir string
 	mysqld    string
+	mysql     string
 	mdbAdmin  string
 	mdbIni    string
+	mysqlMu   sync.Mutex
 	sm        *svcMgr
 }
 
@@ -68,6 +73,7 @@ func NewApp() *App {
 		httpdBin:  filepath.Join(root, "bin", "httpd-2.4.66-251206-Win64-VS17", "Apache24", "bin", "httpd.exe"),
 		mdbBinDir: filepath.Join(root, "bin", "mysql-8.4.11-winx64", "bin"),
 		mysqld:    filepath.Join(root, "bin", "mysql-8.4.11-winx64", "bin", "mysqld.exe"),
+		mysql:     filepath.Join(root, "bin", "mysql-8.4.11-winx64", "bin", "mysql.exe"),
 		mdbAdmin:  filepath.Join(root, "bin", "mysql-8.4.11-winx64", "bin", "mysqladmin.exe"),
 		mdbIni:    filepath.Join(root, "bin", "mysql-8.4.11-winx64", "my.ini"),
 	}
@@ -78,6 +84,10 @@ func NewApp() *App {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.copyConfigs()
+	hideFromTaskbar()
+	if a.GetAutostart() {
+		go a.sm.startAll()
+	}
 	time.Sleep(150 * time.Millisecond)
 	a.sm.pushStatus()
 	go func() {
@@ -93,19 +103,29 @@ func (a *App) runTray() {
 	defer gort.UnlockOSThread()
 	tray := systray.New()
 	menu := systray.NewMenu()
+	menu.Add("Show Panel", a.show)
+	menu.AddSeparator()
+	menu.Add("Start All Services", a.sm.startAll)
+	menu.Add("Stop All Services", a.sm.stopAll)
+	menu.AddSeparator()
 	menu.Add("Stop Services and Quit", func() {
 		a.sm.stopAll()
 		a.quit()
 	})
 	menu.AddSeparator()
-	menu.Add("Quit", func() {
-		a.quit()
-	})
+	menu.Add("Quit (services stay running)", a.quit)
 	tray.SetTooltip("WERD Panel")
 	tray.SetIcon(trayIcon)
+	tray.OnClick(a.show)
 	tray.SetMenu(menu)
 	tray.Show()
 	tray.Run()
+}
+
+func (a *App) show() {
+	if a.ctx != nil {
+		runtime.WindowShow(a.ctx)
+	}
 }
 
 func (a *App) quit() {
@@ -135,28 +155,35 @@ func (a *App) StopAll()  { a.sm.stopAll() }
 
 func (a *App) ListProjects() []Project { return loadProjects(a.root) }
 
-func (a *App) AddProject(path, url string) []Project {
+func (a *App) AddProject(path, host string) []Project {
 	if path == "" {
 		return loadProjects(a.root)
 	}
 	ps := loadProjects(a.root)
-	ps = append(ps, Project{ID: strconv.FormatInt(time.Now().UnixNano(), 10), Path: path, URL: url})
+	if host == "" {
+		host = projectHost(Project{Path: path})
+	}
+	ps = append(ps, Project{ID: strconv.FormatInt(time.Now().UnixNano(), 10), Path: path, Host: host})
 	saveProjects(a.root, ps)
 	writeVhosts(a.root)
 	a.sm.restartApache()
+	a.ensureHostsEntry(host)
 	ps = loadProjects(a.root)
 	a.emit("projects", map[string]any{"projects": ps})
 	return ps
 }
 
-func (a *App) UpdateUrl(id, url string) []Project {
+func (a *App) UpdateHost(id, host string) []Project {
 	ps := loadProjects(a.root)
 	for i := range ps {
 		if ps[i].ID == id {
-			ps[i].URL = url
+			ps[i].Host = host
 		}
 	}
 	saveProjects(a.root, ps)
+	writeVhosts(a.root)
+	a.sm.restartApache()
+	a.ensureHostsEntry(host)
 	ps = loadProjects(a.root)
 	a.emit("projects", map[string]any{"projects": ps})
 	return ps
@@ -166,9 +193,13 @@ func (a *App) RemoveProject(id string) []Project {
 	ps := loadProjects(a.root)
 	out := ps[:0]
 	for _, p := range ps {
-		if p.ID != id {
-			out = append(out, p)
+		if p.ID == id {
+			cert, key := a.certFiles(projectHost(p))
+			os.Remove(cert)
+			os.Remove(key)
+			continue
 		}
+		out = append(out, p)
 	}
 	saveProjects(a.root, out)
 	writeVhosts(a.root)
@@ -199,12 +230,93 @@ func (a *App) SetPhpPath(on bool) bool {
 	return phpInUserPath(a.root)
 }
 
+// ---- settings ----
+
+type settings struct {
+	Autostart bool `json:"autostart"`
+}
+
+func settingsFile(root string) string {
+	os.MkdirAll(filepath.Join(root, "var"), 0755)
+	return filepath.Join(root, "var", "settings.json")
+}
+
+func loadSettings(root string) settings {
+	var s settings
+	data, err := os.ReadFile(settingsFile(root))
+	if err != nil {
+		s.Autostart = true
+		return s
+	}
+	if json.Unmarshal(data, &s) != nil {
+		s.Autostart = true
+	}
+	return s
+}
+
+func saveSettings(root string, s settings) {
+	b, _ := json.MarshalIndent(s, "", "  ")
+	os.WriteFile(settingsFile(root), b, 0644)
+}
+
+func (a *App) GetAutostart() bool { return loadSettings(a.root).Autostart }
+
+func (a *App) SetAutostart(on bool) bool {
+	s := loadSettings(a.root)
+	s.Autostart = on
+	saveSettings(a.root, s)
+	return on
+}
+
+// ---- databases ----
+
+func (a *App) ListDatabases() []string {
+	out, err := noWindow(exec.Command(a.mysql, "-u", "root", "-N", "-e", "SHOW DATABASES")).Output()
+	if err != nil {
+		return nil
+	}
+	system := map[string]bool{"information_schema": true, "performance_schema": true, "mysql": true, "sys": true}
+	var dbs []string
+	for _, l := range strings.Split(string(out), "\n") {
+		n := strings.TrimSpace(l)
+		if n != "" && !system[n] {
+			dbs = append(dbs, n)
+		}
+	}
+	return dbs
+}
+
+func (a *App) OpenInExplorer(path string) {
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(a.root, path)
+	}
+	noWindow(exec.Command("explorer", "/select,"+path)).Start()
+}
+
 // ---- projects ----
 
 type Project struct {
 	ID   string `json:"id"`
 	Path string `json:"path"`
-	URL  string `json:"url"`
+	Host string `json:"host"`
+	SSL  bool   `json:"ssl"`
+}
+
+func projectHost(p Project) string {
+	if p.Host != "" {
+		return p.Host
+	}
+	base := filepath.Base(filepath.Clean(p.Path))
+	re := regexp.MustCompile(`[^a-zA-Z0-9.-]+`)
+	return strings.ToLower(re.ReplaceAllString(base, "-")) + ".localhost"
+}
+
+func projectURL(p Project) string {
+	scheme := "http"
+	if p.SSL {
+		scheme = "https"
+	}
+	return scheme + "://" + projectHost(p)
 }
 
 func projectsFile(root string) string {
@@ -231,17 +343,11 @@ func saveProjects(root string, ps []Project) {
 
 // ---- vhosts ----
 
-func projectHost(path string) string {
-	base := filepath.Base(filepath.Clean(path))
-	re := regexp.MustCompile(`[^a-zA-Z0-9.-]+`)
-	return strings.ToLower(re.ReplaceAllString(base, "-")) + ".localhost"
-}
-
 func writeVhosts(root string) {
 	os.MkdirAll(filepath.Join(root, "var"), 0755)
 	var b strings.Builder
 	for _, p := range loadProjects(root) {
-		host := projectHost(p.Path)
+		host := projectHost(p)
 		dir := p.Path
 		if s, err := os.Stat(filepath.Join(dir, "public")); err == nil && s.IsDir() {
 			dir = filepath.Join(dir, "public")
@@ -257,10 +363,312 @@ func writeVhosts(root string) {
 		b.WriteString("        Require all granted\n")
 		b.WriteString("    </Directory>\n")
 		b.WriteString("</VirtualHost>\n")
+		if p.SSL {
+			cert := filepath.Join(root, "var", "certs", host+".pem")
+			key := filepath.Join(root, "var", "certs", host+"-key.pem")
+			b.WriteString("<VirtualHost *:443>\n")
+			b.WriteString("    ServerName " + host + "\n")
+			b.WriteString("    ServerAlias www." + host + "\n")
+			b.WriteString("    DocumentRoot \"" + dirSlashed + "\"\n")
+			b.WriteString("    SSLEngine on\n")
+			b.WriteString("    SSLCertificateFile \"" + filepath.ToSlash(cert) + "\"\n")
+			b.WriteString("    SSLCertificateKeyFile \"" + filepath.ToSlash(key) + "\"\n")
+			b.WriteString("    <Directory \"" + dirSlashed + "\">\n")
+			b.WriteString("        Options Indexes FollowSymLinks\n")
+			b.WriteString("        AllowOverride All\n")
+			b.WriteString("        Require all granted\n")
+			b.WriteString("    </Directory>\n")
+			b.WriteString("</VirtualHost>\n")
+		}
 	}
 	if err := os.WriteFile(filepath.Join(root, "var", "vhosts.conf"), []byte(b.String()), 0644); err != nil {
 		log.Printf("[vhosts] write: %v", err)
 	}
+}
+
+// ---- ssl (mkcert) ----
+
+const mkcertURL = "https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.4.4-windows-amd64.exe"
+
+const mysqlURL = "https://cdn.mysql.com//Downloads/MySQL-8.4/mysql-8.4.11-winx64.zip"
+
+func (a *App) mkcertBin() string { return filepath.Join(a.root, "var", "tools", "mkcert.exe") }
+
+func (a *App) certDir() string { return filepath.Join(a.root, "var", "certs") }
+
+func (a *App) certFiles(host string) (cert, key string) {
+	os.MkdirAll(a.certDir(), 0755)
+	cert = filepath.Join(a.certDir(), host+".pem")
+	key = filepath.Join(a.certDir(), host+"-key.pem")
+	return cert, key
+}
+
+func (a *App) ensureMkcert() error {
+	bin := a.mkcertBin()
+	if _, err := os.Stat(bin); err == nil {
+		return nil
+	}
+	os.MkdirAll(filepath.Dir(bin), 0755)
+	resp, err := http.Get(mkcertURL)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("download mkcert: HTTP %d", resp.StatusCode)
+	}
+	tmp := bin + ".tmp"
+	f, err := os.Create(tmp)
+	if err != nil {
+		return err
+	}
+	if _, err = io.Copy(f, resp.Body); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return err
+	}
+	f.Close()
+	return os.Rename(tmp, bin)
+}
+
+func (a *App) runMkcert(args ...string) error {
+	if err := a.ensureMkcert(); err != nil {
+		return err
+	}
+	cmd := noWindow(exec.Command(a.mkcertBin(), args...))
+	cmd.Env = append(os.Environ(), "JAVA_HOME=")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("mkcert %v: %v: %s", args, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func (a *App) CAInstalled() bool {
+	bin := a.mkcertBin()
+	if _, err := os.Stat(bin); err != nil {
+		return false
+	}
+	script := "if (Get-ChildItem Cert:\\CurrentUser\\Root | Where-Object { $_.Subject -match 'mkcert' }) { exit 0 } else { exit 1 }"
+	if err := noWindow(exec.Command("powershell", "-NoProfile", "-Command", script)).Run(); err == nil {
+		return true
+	}
+	out, err := noWindow(exec.Command(bin, "-CAROOT")).Output()
+	if err != nil {
+		return false
+	}
+	_, err = os.Stat(filepath.Join(strings.TrimSpace(string(out)), "rootCA.pem"))
+	return err == nil
+}
+
+func (a *App) InstallCA() bool {
+	if err := a.runMkcert("-install"); err != nil && !a.CAInstalled() {
+		a.emit("error", map[string]any{"service": "ssl", "message": err.Error()})
+	}
+	return a.CAInstalled()
+}
+
+func (a *App) UninstallCA() bool {
+	if err := a.runMkcert("-uninstall"); err != nil && a.CAInstalled() {
+		a.emit("error", map[string]any{"service": "ssl", "message": err.Error()})
+	}
+	return a.CAInstalled()
+}
+
+func (a *App) InstallSSL(id string) []Project {
+	ps := loadProjects(a.root)
+	var p *Project
+	for i := range ps {
+		if ps[i].ID == id {
+			p = &ps[i]
+		}
+	}
+	if p == nil {
+		return loadProjects(a.root)
+	}
+	if !a.CAInstalled() && !a.InstallCA() {
+		return loadProjects(a.root)
+	}
+	host := projectHost(*p)
+	cert, key := a.certFiles(host)
+	os.Remove(cert)
+	os.Remove(key)
+	if err := a.runMkcert("-cert-file", cert, "-key-file", key, host, "www."+host); err != nil {
+		a.emit("error", map[string]any{"service": "ssl", "message": err.Error()})
+		return loadProjects(a.root)
+	}
+	p.SSL = true
+	saveProjects(a.root, ps)
+	writeVhosts(a.root)
+	a.sm.restartApache()
+	ps = loadProjects(a.root)
+	a.emit("projects", map[string]any{"projects": ps})
+	return ps
+}
+
+func (a *App) UninstallSSL(id string) []Project {
+	ps := loadProjects(a.root)
+	var host string
+	for i := range ps {
+		if ps[i].ID == id {
+			host = projectHost(ps[i])
+			ps[i].SSL = false
+		}
+	}
+	if host != "" {
+		cert, key := a.certFiles(host)
+		os.Remove(cert)
+		os.Remove(key)
+	}
+	saveProjects(a.root, ps)
+	writeVhosts(a.root)
+	a.sm.restartApache()
+	ps = loadProjects(a.root)
+	a.emit("projects", map[string]any{"projects": ps})
+	return ps
+}
+
+func (a *App) ensureHostsEntry(host string) {
+	if host == "" || strings.EqualFold(host, "localhost") || strings.HasSuffix(strings.ToLower(host), ".localhost") {
+		return
+	}
+	hostsPath := "C:\\Windows\\System32\\drivers\\etc\\hosts"
+	data, err := os.ReadFile(hostsPath)
+	if err != nil {
+		a.emit("error", map[string]any{"service": "ssl", "message": "hosts: " + err.Error()})
+		return
+	}
+	for _, l := range strings.Split(string(data), "\n") {
+		t := strings.TrimSpace(l)
+		if strings.HasSuffix(t, " "+host) || strings.HasSuffix(t, " www."+host) {
+			return
+		}
+	}
+	entry := "\n127.0.0.1 " + host + " www." + host + "\n"
+	if err := os.WriteFile(hostsPath, append(data, []byte(entry)...), 0644); err != nil {
+		a.emit("error", map[string]any{"service": "ssl", "message": "hosts (jalankan sebagai admin?): " + err.Error()})
+	}
+}
+
+// ---- mysql (optional) ----
+
+func (a *App) MySQLInstalled() bool {
+	_, err := os.Stat(a.mysqld)
+	return err == nil
+}
+
+type progressWriter struct {
+	emit  func(string, any)
+	total int64
+	done  int64
+	last  time.Time
+	mu    sync.Mutex
+}
+
+func (w *progressWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	w.done += int64(len(p))
+	now := time.Now()
+	if now.Sub(w.last) > 500*time.Millisecond {
+		w.last = now
+		w.emit("mysql-progress", map[string]any{"done": w.done, "total": w.total})
+	}
+	w.mu.Unlock()
+	return len(p), nil
+}
+
+func unzip(src, dest string) error {
+	r, err := zip.OpenReader(src)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+	dest = filepath.Clean(dest)
+	for _, f := range r.File {
+		p := filepath.Join(dest, f.Name)
+		if !strings.HasPrefix(p, dest+string(os.PathSeparator)) {
+			continue
+		}
+		if f.FileInfo().IsDir() {
+			os.MkdirAll(p, 0755)
+			continue
+		}
+		os.MkdirAll(filepath.Dir(p), 0755)
+		rc, err := f.Open()
+		if err != nil {
+			return err
+		}
+		w, err := os.Create(p)
+		if err != nil {
+			rc.Close()
+			return err
+		}
+		if _, err = io.Copy(w, rc); err != nil {
+			w.Close()
+			rc.Close()
+			return err
+		}
+		w.Close()
+		rc.Close()
+	}
+	return nil
+}
+
+func (a *App) InstallMySQL() bool {
+	a.mysqlMu.Lock()
+	defer a.mysqlMu.Unlock()
+	if a.MySQLInstalled() {
+		return true
+	}
+
+	binDir := filepath.Join(a.root, "bin")
+	tmp := filepath.Join(a.root, "var", "mysql.zip")
+	os.MkdirAll(binDir, 0755)
+
+	resp, err := http.Get(mysqlURL)
+	if err != nil {
+		a.emit("error", map[string]any{"service": "mariadb", "message": "download mysql: " + err.Error()})
+		return false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		a.emit("error", map[string]any{"service": "mariadb", "message": fmt.Sprintf("download mysql: HTTP %d", resp.StatusCode)})
+		return false
+	}
+
+	f, err := os.Create(tmp)
+	if err != nil {
+		a.emit("error", map[string]any{"service": "mariadb", "message": err.Error()})
+		return false
+	}
+	pw := &progressWriter{emit: a.emit, total: resp.ContentLength}
+	if _, err = io.Copy(f, io.TeeReader(resp.Body, pw)); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		a.emit("error", map[string]any{"service": "mariadb", "message": "download mysql: " + err.Error()})
+		return false
+	}
+	f.Close()
+
+	if err = unzip(tmp, binDir); err != nil {
+		os.Remove(tmp)
+		a.emit("error", map[string]any{"service": "mariadb", "message": "extract mysql: " + err.Error()})
+		return false
+	}
+	os.Remove(tmp)
+
+	copyConfig(a.root, filepath.Join(a.root, "config", "my.ini"), filepath.Join(a.root, "bin", "mysql-8.4.11-winx64", "my.ini"))
+
+	dataDir := filepath.Join(a.root, "var", "mysql")
+	if _, err := os.Stat(filepath.Join(dataDir, "mysql")); os.IsNotExist(err) {
+		os.MkdirAll(dataDir, 0755)
+		if out, err := noWindow(exec.Command(a.mysqld, "--initialize-insecure", "--datadir="+dataDir)).CombinedOutput(); err != nil {
+			a.emit("error", map[string]any{"service": "mariadb", "message": "initialize: " + string(out)})
+		}
+	}
+
+	a.emit("mysql-progress", map[string]any{"done": 1, "total": 1})
+	return a.MySQLInstalled()
 }
 
 // ---- config ----
@@ -281,8 +689,10 @@ func (a *App) copyConfigs() {
 	os.MkdirAll(a.logDir, 0755)
 	os.MkdirAll(filepath.Join(a.root, "var", "www"), 0755)
 	copyConfig(a.root, filepath.Join(a.root, "config", "httpd.conf"), filepath.Join(a.httpdRoot, "conf", "httpd.conf"))
-	copyConfig(a.root, filepath.Join(a.root, "config", "php.ini"), filepath.Join(a.root, "bin", "php-8.4.23-Win32-vs17-x64", "php.ini"))
-	copyConfig(a.root, filepath.Join(a.root, "config", "my.ini"), filepath.Join(a.root, "bin", "mysql-8.4.11-winx64", "my.ini"))
+	copyConfig(a.root, filepath.Join(a.root, "config", "php.ini"), filepath.Join(a.root, "bin", "php-8.4.24-Win32-vs17-x64", "php.ini"))
+	if _, err := os.Stat(filepath.Join(a.root, "bin", "mysql-8.4.11-winx64")); err == nil {
+		copyConfig(a.root, filepath.Join(a.root, "config", "my.ini"), filepath.Join(a.root, "bin", "mysql-8.4.11-winx64", "my.ini"))
+	}
 	copyConfig(a.root, filepath.Join(a.root, "config", "config.inc.php"), filepath.Join(a.root, "bin", "phpMyAdmin-5.2.3-english", "config.inc.php"))
 	writeVhosts(a.root)
 }
@@ -312,7 +722,6 @@ func newSvcMgr(a *App) *svcMgr {
 		},
 	}
 }
-
 
 func imageFor(service string) string {
 	if service == "mariadb" {
@@ -452,6 +861,11 @@ func (m *svcMgr) start(service string) {
 		cmd = noWindow(exec.Command(a.httpdBin, "-d", a.httpdRoot))
 		cmd.Dir = a.httpdRoot
 	case "mariadb":
+		if !a.MySQLInstalled() {
+			s.mu.Unlock()
+			m.emit("status", map[string]any{"service": service, "running": false, "procs": []procInfo{}})
+			return
+		}
 		dataDir := filepath.Join(a.root, "var", "mysql")
 		if _, err := os.Stat(filepath.Join(dataDir, "mysql")); os.IsNotExist(err) {
 			os.MkdirAll(dataDir, 0755)
@@ -561,4 +975,3 @@ func (w *lineWriter) Write(p []byte) (int, error) {
 	}
 	return len(p), nil
 }
-

@@ -21,14 +21,15 @@ func main() {
 
 	// Create application with options
 	err := wails.Run(&options.App{
-		Title:     "WERD Panel",
-		Width:     800,
-		Height:    600,
-		DisableResize: true,
-		MinWidth:  800,
-		MaxWidth:  800,
-		MinHeight: 600,
-		MaxHeight: 600,
+		Title:             "WERD Panel",
+		Width:             800,
+		Height:            600,
+		DisableResize:     true,
+		MinWidth:          800,
+		MaxWidth:          800,
+		MinHeight:         600,
+		MaxHeight:         600,
+		HideWindowOnClose: true,
 		Windows: &windows.Options{
 			WebviewGpuIsDisabled: true,
 			BackdropType:         windows.None,
