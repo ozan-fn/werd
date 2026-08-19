@@ -11,20 +11,57 @@ import (
 	"time"
 	"unsafe"
 
+	syswin "golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 )
 
 var (
-	user32                = syscall.NewLazyDLL("user32.dll")
-	procFindWindowW       = user32.NewProc("FindWindowW")
-	procGetWindowLongPtrW = user32.NewProc("GetWindowLongPtrW")
-	procSetWindowLongPtrW = user32.NewProc("SetWindowLongPtrW")
+	user32                  = syscall.NewLazyDLL("user32.dll")
+	procFindWindowW         = user32.NewProc("FindWindowW")
+	procGetWindowLongPtrW   = user32.NewProc("GetWindowLongPtrW")
+	procSetWindowLongPtrW   = user32.NewProc("SetWindowLongPtrW")
+	procShowWindow          = user32.NewProc("ShowWindow")
+	procSetForegroundWindow = user32.NewProc("SetForegroundWindow")
 )
 
 const (
 	gwlExStyle     = 0xFFFFFFFFFFFFFFEC
 	wsExToolWindow = 0x00000080
+
+	singletonName = "WERD Panel"
 )
+
+var singletonMutex syswin.Handle
+
+func acquireSingleton() bool {
+	name, _ := syswin.UTF16PtrFromString(singletonName)
+	mu, err := syswin.CreateMutex(nil, false, name)
+	if err == syswin.ERROR_ALREADY_EXISTS {
+		return false
+	}
+	if err != nil {
+		return false
+	}
+	singletonMutex = mu
+	return true
+}
+
+func findWindow(title string) syswin.Handle {
+	t, _ := syswin.UTF16PtrFromString(title)
+	r, _, _ := procFindWindowW.Call(0, uintptr(unsafe.Pointer(t)))
+	return syswin.Handle(r)
+}
+
+func notifyAlreadyRunning() {
+	hwnd := findWindow(singletonName)
+	if hwnd != 0 {
+		procShowWindow.Call(uintptr(hwnd), 9) // SW_RESTORE
+		procSetForegroundWindow.Call(uintptr(hwnd))
+	}
+	caption, _ := syswin.UTF16PtrFromString("WERD Panel")
+	text, _ := syswin.UTF16PtrFromString("WERD Panel sudah berjalan.")
+	syswin.MessageBox(syswin.HWND(hwnd), text, caption, 0x40|0x10000) // MB_ICONINFORMATION|MB_SETFOREGROUND
+}
 
 func noWindow(cmd *exec.Cmd) *exec.Cmd {
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
