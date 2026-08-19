@@ -104,16 +104,15 @@ func (a *App) runTray() {
 	tray := systray.New()
 	menu := systray.NewMenu()
 	menu.Add("Show Panel", a.show)
+	menu.Add("Minimize", a.hide)
 	menu.AddSeparator()
 	menu.Add("Start All Services", a.sm.startAll)
 	menu.Add("Stop All Services", a.sm.stopAll)
 	menu.AddSeparator()
-	menu.Add("Stop Services and Quit", func() {
+	menu.Add("Stop All + Quit", func() {
 		a.sm.stopAll()
 		a.quit()
 	})
-	menu.AddSeparator()
-	menu.Add("Quit (services stay running)", a.quit)
 	tray.SetTooltip("WERD Panel")
 	tray.SetIcon(trayIcon)
 	tray.OnClick(a.show)
@@ -126,6 +125,17 @@ func (a *App) show() {
 	if a.ctx != nil {
 		runtime.WindowShow(a.ctx)
 	}
+}
+
+func (a *App) hide() {
+	if a.ctx != nil {
+		runtime.WindowHide(a.ctx)
+	}
+}
+
+func (a *App) Quit() {
+	a.sm.stopAll()
+	a.quit()
 }
 
 func (a *App) quit() {

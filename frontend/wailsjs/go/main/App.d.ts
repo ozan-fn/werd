@@ -30,6 +30,8 @@ export function OpenURL(arg1:string):Promise<void>;
 
 export function PickFolder():Promise<string>;
 
+export function Quit():Promise<void>;
+
 export function RemoveProject(arg1:string):Promise<Array<main.Project>>;
 
 export function Restart(arg1:string):Promise<void>;

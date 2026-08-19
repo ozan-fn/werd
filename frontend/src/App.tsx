@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime';
+import { EventsOn, EventsOff, WindowHide } from '../wailsjs/runtime/runtime';
 import {
-  Start, Stop, Restart, StartAll, StopAll,
+  Start, Stop, Restart, StartAll, StopAll, Quit,
   ListProjects, AddProject, UpdateHost, RemoveProject, PickFolder,
   GetPhpPath, SetPhpPath, OpenURL,
   ListDatabases, GetAutostart, SetAutostart, OpenInExplorer,
@@ -108,22 +108,36 @@ const Header = ({ running, connected }: { running: boolean; connected: boolean }
       <h1 className="text-2xl font-semibold tracking-tight">WERD Panel</h1>
       <p className="text-sm text-zinc-400">localhost · control panel</p>
     </div>
-    <span
-      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ${
-        running
-          ? 'bg-emerald-500/15 text-emerald-400'
-          : connected
-            ? 'bg-amber-500/15 text-amber-400'
-            : 'bg-red-500/15 text-red-400'
-      }`}
-    >
+    <div className="flex items-center gap-2">
       <span
-        className={`size-2 rounded-full ${
-          running ? 'bg-emerald-400' : connected ? 'bg-amber-400' : 'bg-red-400'
+        className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ${
+          running
+            ? 'bg-emerald-500/15 text-emerald-400'
+            : connected
+              ? 'bg-amber-500/15 text-amber-400'
+              : 'bg-red-500/15 text-red-400'
         }`}
-      />
-      {!connected ? 'Offline' : running ? 'Running' : 'Stopped'}
-    </span>
+      >
+        <span
+          className={`size-2 rounded-full ${
+            running ? 'bg-emerald-400' : connected ? 'bg-amber-400' : 'bg-red-400'
+          }`}
+        />
+        {!connected ? 'Offline' : running ? 'Running' : 'Stopped'}
+      </span>
+      <button
+        onClick={() => WindowHide()}
+        className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-800"
+      >
+        Minimize
+      </button>
+      <button
+        onClick={() => Quit()}
+        className="rounded-lg border border-red-800 px-3 py-1.5 text-xs font-medium text-red-400 hover:bg-red-950"
+      >
+        Stop All + Quit
+      </button>
+    </div>
   </header>
 );
 
