@@ -63,8 +63,9 @@ jobs:
 
       - name: Install UPX (for wails -upx)
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y upx
+          curl -fLo /tmp/upx.tar.xz "https://github.com/upx/upx/releases/download/v5.0.2/upx-5.0.2-amd64_linux.tar.xz"
+          tar -xJf /tmp/upx.tar.xz -C /tmp
+          echo "/tmp/upx-5.0.2-amd64_linux" >> "$GITHUB_PATH"
 
       - name: Build Wails app (windows/amd64)
         run: wails build -platform windows/amd64 -clean -upx
@@ -74,7 +75,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: download
-          key: werd-packages-v4
+          key: werd-packages-v5
 
       - name: Download packages
         run: |
