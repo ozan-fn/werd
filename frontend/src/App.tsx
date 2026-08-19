@@ -5,7 +5,7 @@ import {
   ListProjects, AddProject, UpdateUrl, RemoveProject, PickFolder,
   GetPhpPath, SetPhpPath, OpenURL,
 } from '../wailsjs/go/main/App';
-import './App.css';
+import './app.css';
 
 type Status = { apache: boolean; mariadb: boolean };
 type Proc = { pid: number; cpu: number; ram: number };
