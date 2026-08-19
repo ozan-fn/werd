@@ -18,46 +18,27 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
-
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: 'pnpm'
-          cache-dependency-path: web/pnpm-lock.yaml
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
 
-      - name: Build web (dist + brotli)
-        working-directory: web
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0
+
+      - name: Build frontend (npm install + vite)
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install UPX (for wails -upx)
         run: |
-          pnpm install --frozen-lockfile
-          pnpm run build
+          sudo apt-get update -y
+          sudo apt-get install -y upx
 
-      - name: Cache UPX
-        id: cache-upx
-        uses: actions/cache@v4
-        with:
-          path: ~/.local/bin/upx
-          key: upx-5.2.0
-
-      - name: Install UPX
-        if: steps.cache-upx.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p ~/.local/bin
-          curl -fLo /tmp/upx.tar.xz "https://github.com/upx/upx/releases/download/v5.2.0/upx-5.2.0-amd64_linux.tar.xz"
-          tar -xJf /tmp/upx.tar.xz --strip-components=1 -C ~/.local/bin upx-5.2.0-amd64_linux/upx
-
-      - name: Add UPX to PATH
-        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
-      - name: Build werd.exe
-        run: GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "-s -w -H=windowsgui" -o werd.exe .
-
-      - name: Compress werd.exe
-        run: upx --best --lzma werd.exe
+      - name: Build Wails app (windows/amd64)
+        run: wails build -platform windows/amd64 -clean -upx
 
       - name: Cache downloaded packages
         id: cache-pkg
@@ -108,7 +89,8 @@ jobs:
           mv "$W/bin/php-extract" "$W/bin/php-8.4.23-Win32-vs17-x64"
 
           cp -r config "$W/config"
-          cp werd.exe README.md "$W/"
+          cp build/bin/werd.exe "$W/werd.exe"
+          cp README.md "$W/"
           touch "$W/var/logs/.gitkeep"
 
       - name: Zip release
@@ -130,4 +112,4 @@ jobs:
           gh release delete-asset "$TAG" werd-windows-x64.zip --yes || echo "no prior zip"
           gh release delete-asset "$TAG" werd.exe --yes || echo "no prior exe"
           gh release upload "$TAG" werd-windows-x64.zip --clobber
-          gh release upload "$TAG" werd.exe --clobber
+          gh release upload "$TAG" build/bin/werd.exe --clobber

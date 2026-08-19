@@ -20,6 +20,10 @@ node_modules/
 web/node_modules/
 web/dist/
 
+# Wails build
+build/bin
+frontend/dist/
+
 # OS / editor
 .DS_Store
 Thumbs.db
